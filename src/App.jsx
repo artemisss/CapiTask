@@ -453,20 +453,24 @@ const Modal = ({ isOpen, onClose, title, children, width = '600px' }) => {
         onClose();
       }
     }}>
-      <div style={{
-        background: 'white',
-        width,
-        maxWidth: '95vw',
-        border: '1px solid var(--text-color)',
-        borderRadius: 'var(--radius-lg)',
-        padding: '40px',
-        boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
-        position: 'relative'
-      }}
-      onMouseDown={(event) => {
-        // Останавливаем всплытие, чтобы клик внутри окна не закрывал модалку.
-        event.stopPropagation();
-      }}>
+      <div
+        className="modal-scroll-hidden"
+        style={{
+          background: 'white',
+          width,
+          maxWidth: '95vw',
+          maxHeight: '86vh',
+          overflowY: 'auto',
+          border: '1px solid var(--text-color)',
+          borderRadius: 'var(--radius-lg)',
+          padding: '40px',
+          boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+          position: 'relative'
+        }}
+        onMouseDown={(event) => {
+          // Останавливаем всплытие, чтобы клик внутри окна не закрывал модалку.
+          event.stopPropagation();
+        }}>
         <span onClick={onClose} style={{
           position: 'absolute',
           top: '24px',

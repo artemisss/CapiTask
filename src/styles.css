@@ -27,3 +27,14 @@ button {
   background: none;
   font-size: 1rem;
 }
+
+/* Скрываем полосу прокрутки в модалках, но сохраняем возможность скролла. */
+.modal-scroll-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.modal-scroll-hidden::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
