@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link, useSearchParams } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, NavLink, useSearchParams } from 'react-router-dom';
 
 const STORAGE_KEY = 'capitask_data';
 const LANGUAGE_STORAGE_KEY = 'capitask_language';
 const ISSUES_VIEW_MODE_STORAGE_KEY = 'capitask_issues_view_mode';
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@'];
 const DEFAULT_LANGUAGE = 'en';
+const ISSUE_TYPES = ['Task', 'Bug', 'Story'];
+const ISSUE_PRIORITIES = ['High', 'Medium', 'Low'];
+const ISSUE_STATUSES = ['To Do', 'In Progress', 'Done'];
+const ISSUE_TYPES_SET = new Set(ISSUE_TYPES);
+const ISSUE_PRIORITIES_SET = new Set(ISSUE_PRIORITIES);
+const ISSUE_STATUSES_SET = new Set(ISSUE_STATUSES);
+const MAX_TITLE_LENGTH = 120;
+const MAX_DESCRIPTION_LENGTH = 3000;
+const MAX_ASSIGNEE_LENGTH = 80;
+const MAX_COMMENT_LENGTH = 1000;
+const DATE_INPUT_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 const I18N = {
   en: {
@@ -44,6 +55,7 @@ const I18N = {
     description: 'Description',
     storyPoints: 'Story Points',
     dueDate: 'Due Date',
+    defaultIssueTitle: 'Untitled issue',
     assigneePlaceholder: 'John Doe',
     cancel: 'Cancel',
     saveIssue: 'Save Issue',
@@ -119,6 +131,7 @@ const I18N = {
     description: 'Описание',
     storyPoints: 'Стори поинты',
     dueDate: 'Дата дедлайна',
+    defaultIssueTitle: 'Задача без названия',
     assigneePlaceholder: 'Иван Иванов',
     cancel: 'Отмена',
     saveIssue: 'Сохранить задачу',
@@ -212,6 +225,209 @@ const getInitialIssuesViewMode = () => {
     console.error('Не удалось прочитать сохранённый режим отображения задач.', error);
     return 'board';
   }
+};
+
+const resolveAllowedValue = (allowedValuesSet, value, fallbackValue) => (
+  allowedValuesSet.has(value) ? value : fallbackValue
+);
+
+const clampInteger = (value, minValue, maxValue, fallbackValue = minValue) => {
+  const parsedValue = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsedValue)) {
+    return fallbackValue;
+  }
+  return Math.max(minValue, Math.min(maxValue, parsedValue));
+};
+
+const toSafeSingleLineText = (value, maxLength) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+};
+
+const toSafeMultilineText = (value, maxLength) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim()
+    .slice(0, maxLength);
+};
+
+const normalizeDueDateInput = (value) => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return '';
+  }
+
+  if (!DATE_INPUT_PATTERN.test(trimmedValue)) {
+    return '';
+  }
+
+  const [year, month, day] = trimmedValue.split('-').map((part) => Number.parseInt(part, 10));
+  const candidateDate = new Date(year, month - 1, day);
+  const isValidDate = (
+    candidateDate.getFullYear() === year
+    && candidateDate.getMonth() === month - 1
+    && candidateDate.getDate() === day
+  );
+
+  return isValidDate ? trimmedValue : '';
+};
+
+const normalizeIssueStatus = (statusValue, fallbackStatus = 'To Do') => (
+  resolveAllowedValue(ISSUE_STATUSES_SET, statusValue, fallbackStatus)
+);
+
+const normalizeIssueFormData = (formData, fallbackIssue = null, defaultTitle = 'Issue') => {
+  const fallbackTitle = toSafeSingleLineText(fallbackIssue?.title, MAX_TITLE_LENGTH) || defaultTitle;
+
+  return {
+    title: toSafeSingleLineText(formData?.title, MAX_TITLE_LENGTH) || fallbackTitle,
+    description: toSafeMultilineText(formData?.description, MAX_DESCRIPTION_LENGTH),
+    type: resolveAllowedValue(
+      ISSUE_TYPES_SET,
+      formData?.type,
+      resolveAllowedValue(ISSUE_TYPES_SET, fallbackIssue?.type, 'Task')
+    ),
+    priority: resolveAllowedValue(
+      ISSUE_PRIORITIES_SET,
+      formData?.priority,
+      resolveAllowedValue(ISSUE_PRIORITIES_SET, fallbackIssue?.priority, 'Low')
+    ),
+    storyPoints: clampInteger(formData?.storyPoints, 0, 100, clampInteger(fallbackIssue?.storyPoints, 0, 100, 0)),
+    dueDate: normalizeDueDateInput(formData?.dueDate),
+    assignee: toSafeSingleLineText(formData?.assignee, MAX_ASSIGNEE_LENGTH)
+  };
+};
+
+const normalizeStoredComment = (comment, issueId, index) => {
+  const text = toSafeMultilineText(comment?.text, MAX_COMMENT_LENGTH);
+  if (!text) {
+    return null;
+  }
+
+  const createdAtRaw = typeof comment?.createdAt === 'string' ? comment.createdAt : '';
+  const createdAtTimestamp = Date.parse(createdAtRaw);
+  const createdAt = Number.isNaN(createdAtTimestamp)
+    ? new Date().toISOString()
+    : new Date(createdAtTimestamp).toISOString();
+
+  return {
+    id: toSafeSingleLineText(comment?.id, 48) || `${issueId}-CMT-${index + 1}`,
+    text,
+    author: toSafeSingleLineText(comment?.author, MAX_ASSIGNEE_LENGTH) || 'Admin',
+    createdAt
+  };
+};
+
+const normalizeStoredIssue = (issue, index) => {
+  const issueId = toSafeSingleLineText(issue?.id, 32) || `PROJ-${index + 1}`;
+  const relatedIds = Array.isArray(issue?.relatesTo) ? issue.relatesTo : [];
+  const safeRelatesTo = Array.from(
+    new Set(
+      relatedIds
+        .map((relatedId) => toSafeSingleLineText(relatedId, 32))
+        .filter((relatedId) => relatedId && relatedId !== issueId)
+    )
+  ).slice(0, 50);
+  const comments = (Array.isArray(issue?.comments) ? issue.comments : [])
+    .map((comment, commentIndex) => normalizeStoredComment(comment, issueId, commentIndex))
+    .filter(Boolean)
+    .slice(-300);
+
+  return {
+    id: issueId,
+    title: toSafeSingleLineText(issue?.title, MAX_TITLE_LENGTH) || issueId,
+    description: toSafeMultilineText(issue?.description, MAX_DESCRIPTION_LENGTH),
+    type: resolveAllowedValue(ISSUE_TYPES_SET, issue?.type, 'Task'),
+    priority: resolveAllowedValue(ISSUE_PRIORITIES_SET, issue?.priority, 'Low'),
+    status: normalizeIssueStatus(issue?.status, 'To Do'),
+    assignee: toSafeSingleLineText(issue?.assignee, MAX_ASSIGNEE_LENGTH),
+    reporter: toSafeSingleLineText(issue?.reporter, MAX_ASSIGNEE_LENGTH) || 'Admin',
+    storyPoints: clampInteger(issue?.storyPoints, 0, 100, 0),
+    dueDate: normalizeDueDateInput(issue?.dueDate),
+    sprintId: toSafeSingleLineText(issue?.sprintId, 24) || null,
+    epicId: toSafeSingleLineText(issue?.epicId, 24) || null,
+    comments,
+    relatesTo: safeRelatesTo
+  };
+};
+
+const extractIssueNumber = (issueId) => {
+  const match = /^PROJ-(\d+)$/i.exec(issueId);
+  return match ? Number.parseInt(match[1], 10) : 0;
+};
+
+const normalizeStoredData = (parsedData) => {
+  const fallbackData = seedData();
+  const parsedIssues = Array.isArray(parsedData?.issues) ? parsedData.issues.slice(0, 2000) : [];
+  const issues = parsedIssues.map((issue, index) => normalizeStoredIssue(issue, index));
+
+  const sprintSource = typeof parsedData?.sprint === 'object' && parsedData.sprint
+    ? parsedData.sprint
+    : fallbackData.sprint;
+  const sprint = {
+    ...fallbackData.sprint,
+    id: toSafeSingleLineText(sprintSource.id, 24) || fallbackData.sprint.id,
+    name: toSafeSingleLineText(sprintSource.name, 80) || fallbackData.sprint.name,
+    goal: toSafeMultilineText(sprintSource.goal, 240) || fallbackData.sprint.goal,
+    startDate: normalizeDueDateInput(sprintSource.startDate) || fallbackData.sprint.startDate,
+    endDate: normalizeDueDateInput(sprintSource.endDate) || fallbackData.sprint.endDate,
+    isActive: Boolean(sprintSource.isActive)
+  };
+
+  const epicsSource = Array.isArray(parsedData?.epics) ? parsedData.epics.slice(0, 50) : fallbackData.epics;
+  const epics = epicsSource
+    .map((epic, index) => {
+      const color = typeof epic?.color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(epic.color)
+        ? epic.color
+        : '#000000';
+
+      return {
+        id: toSafeSingleLineText(epic?.id, 24) || `E-${index + 1}`,
+        title: toSafeSingleLineText(epic?.title, 80) || `Epic ${index + 1}`,
+        color
+      };
+    })
+    .filter((epic) => epic.id && epic.title);
+
+  const safeEpics = epics.length > 0 ? epics : fallbackData.epics;
+  const fallbackEpicId = safeEpics[0]?.id ?? 'E-1';
+  const normalizedIssues = issues.map((issue) => ({
+    ...issue,
+    epicId: issue.epicId || fallbackEpicId,
+    sprintId: issue.sprintId && issue.sprintId === sprint.id ? sprint.id : issue.sprintId
+  }));
+
+  const maxIssueNumber = normalizedIssues.reduce((maxValue, issue) => (
+    Math.max(maxValue, extractIssueNumber(issue.id))
+  ), 0);
+  const parsedLastId = Number.parseInt(parsedData?.lastId, 10);
+  const lastId = Number.isFinite(parsedLastId)
+    ? Math.max(parsedLastId, maxIssueNumber)
+    : Math.max(fallbackData.lastId, maxIssueNumber);
+
+  return {
+    epics: safeEpics,
+    sprint,
+    issues: normalizedIssues,
+    lastId
+  };
 };
 
 const formatCommentDate = (isoDate, language) => {
@@ -330,18 +546,15 @@ const seedData = () => {
   };
 
   const issues = [];
-  const types = ['Task', 'Bug', 'Story'];
-  const priorities = ['High', 'Medium', 'Low'];
-  const statuses = ['To Do', 'In Progress', 'Done'];
 
   for (let i = 1; i <= 15; i++) {
     issues.push({
       id: `PROJ-${i}`,
       title: `Sample Issue ${i} - ${Math.random().toString(36).substring(7)}`,
       description: 'This is a detailed description of the task.',
-      type: types[Math.floor(Math.random() * types.length)],
-      priority: priorities[Math.floor(Math.random() * priorities.length)],
-      status: statuses[Math.floor(Math.random() * statuses.length)],
+      type: ISSUE_TYPES[Math.floor(Math.random() * ISSUE_TYPES.length)],
+      priority: ISSUE_PRIORITIES[Math.floor(Math.random() * ISSUE_PRIORITIES.length)],
+      status: ISSUE_STATUSES[Math.floor(Math.random() * ISSUE_STATUSES.length)],
       assignee: i % 3 === 0 ? 'Alex' : (i % 2 === 0 ? 'Maria' : 'John'),
       reporter: 'Admin',
       storyPoints: Math.floor(Math.random() * 8) + 1,
@@ -357,11 +570,23 @@ const seedData = () => {
 };
 
 const Header = ({ language, onLanguageChange, t }) => {
+  const getNavLinkStyle = ({ isActive }) => ({
+    textDecoration: 'none',
+    color: 'var(--text-color)',
+    fontWeight: isActive ? 600 : 400,
+    padding: '8px 14px',
+    borderRadius: '999px',
+    background: isActive ? 'rgba(0, 0, 0, 0.06)' : 'transparent',
+    transition: 'background 0.2s'
+  });
+
   return (
     <header style={{
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: '10px 24px',
       padding: '24px 40px',
       borderBottom: '1px solid var(--border-color)',
       position: 'sticky',
@@ -374,29 +599,11 @@ const Header = ({ language, onLanguageChange, t }) => {
         fontWeight: 500,
         letterSpacing: '-0.03em'
       }}>Capitask</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-        <nav>
-          <Link to="/" style={{
-            textDecoration: 'none',
-            color: 'var(--text-color)',
-            marginLeft: '32px',
-            fontWeight: 400,
-            position: 'relative'
-          }}>{t.issuesNav}</Link>
-          <Link to="/sprint" style={{
-            textDecoration: 'none',
-            color: 'var(--text-color)',
-            marginLeft: '32px',
-            fontWeight: 400,
-            position: 'relative'
-          }}>{t.activeSprintNav}</Link>
-          <Link to="/gantt" style={{
-            textDecoration: 'none',
-            color: 'var(--text-color)',
-            marginLeft: '32px',
-            fontWeight: 400,
-            position: 'relative'
-          }}>{t.ganttNav}</Link>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px 24px', flexWrap: 'wrap' }}>
+        <nav style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <NavLink to="/" end style={getNavLinkStyle}>{t.issuesNav}</NavLink>
+          <NavLink to="/sprint" style={getNavLinkStyle}>{t.activeSprintNav}</NavLink>
+          <NavLink to="/gantt" style={getNavLinkStyle}>{t.ganttNav}</NavLink>
         </nav>
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}>
           <span>{t.language}</span>
@@ -662,7 +869,7 @@ const IssueCollaborationPanel = ({
   };
 
   const handleAddComment = () => {
-    const normalizedText = commentDraft.trim();
+    const normalizedText = toSafeMultilineText(commentDraft, MAX_COMMENT_LENGTH);
     if (!normalizedText) {
       return;
     }
@@ -688,6 +895,8 @@ const IssueCollaborationPanel = ({
 
     setCommentDraft('');
   };
+
+  const safeCommentDraft = toSafeMultilineText(commentDraft, MAX_COMMENT_LENGTH);
 
   return (
     <aside style={{ alignSelf: 'start' }}>
@@ -771,14 +980,14 @@ const IssueCollaborationPanel = ({
         <button
           type="button"
           onClick={handleAddComment}
-          disabled={!commentDraft.trim()}
+          disabled={!safeCommentDraft}
           style={{
             border: '1px solid var(--border-color)',
             borderRadius: '10px',
             padding: '8px 10px',
             background: '#fff',
-            color: commentDraft.trim() ? 'var(--text-color)' : '#A0A0A0',
-            cursor: commentDraft.trim() ? 'pointer' : 'not-allowed',
+            color: safeCommentDraft ? 'var(--text-color)' : '#A0A0A0',
+            cursor: safeCommentDraft ? 'pointer' : 'not-allowed',
             marginBottom: '12px'
           }}
         >
@@ -911,16 +1120,18 @@ const IssuesPage = ({ data, setData, t, language }) => {
 
   const handleFormSubmit = (e) => {
     e.preventDefault();
-    
+    const safeFormData = normalizeIssueFormData(formData, editingIssue, t.defaultIssueTitle);
+
     if (editingIssue) {
       const updatedIssues = data.issues.map(i => 
-        i.id === editingIssue.id ? { ...i, ...formData } : i
+        i.id === editingIssue.id ? { ...i, ...safeFormData } : i
       );
       setData({ ...data, issues: updatedIssues });
     } else {
+      const nextIssueId = clampInteger(data.lastId, 0, 999999, 0) + 1;
       const newIssue = {
-        ...formData,
-        id: `PROJ-${data.lastId + 1}`,
+        ...safeFormData,
+        id: `PROJ-${nextIssueId}`,
         status: 'To Do',
         sprintId: 'S-1',
         epicId: 'E-1',
@@ -931,7 +1142,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
       setData({
         ...data,
         issues: [...data.issues, newIssue],
-        lastId: data.lastId + 1
+        lastId: nextIssueId
       });
     }
     
@@ -948,9 +1159,10 @@ const IssuesPage = ({ data, setData, t, language }) => {
   };
 
   const handleDrop = (status) => {
-    if (draggedItem && draggedItem.status !== status) {
+    const safeStatus = normalizeIssueStatus(status, draggedItem?.status || 'To Do');
+    if (draggedItem && draggedItem.status !== safeStatus) {
       const updatedIssues = data.issues.map(i =>
-        i.id === draggedItem.id ? { ...i, status } : i
+        i.id === draggedItem.id ? { ...i, status: safeStatus } : i
       );
       setData({ ...data, issues: updatedIssues });
     }
@@ -1534,8 +1746,9 @@ const SprintPage = ({ data, setData, t, language }) => {
   };
 
   const updateStatus = (id, status) => {
+    const safeStatus = normalizeIssueStatus(status);
     const updatedIssues = data.issues.map(i =>
-      i.id === id ? { ...i, status } : i
+      i.id === id ? { ...i, status: safeStatus } : i
     );
     setData({ ...data, issues: updatedIssues });
   };
@@ -1565,9 +1778,10 @@ const SprintPage = ({ data, setData, t, language }) => {
 
   const handleFormSubmit = (e) => {
     e.preventDefault();
-    
+    const safeFormData = normalizeIssueFormData(formData, editingIssue, t.defaultIssueTitle);
+
     const updatedIssues = data.issues.map(i => 
-      i.id === editingIssue.id ? { ...i, ...formData } : i
+      i.id === editingIssue.id ? { ...i, ...safeFormData } : i
     );
     setData({ ...data, issues: updatedIssues });
     
@@ -2513,14 +2727,8 @@ const App = () => {
         return seedData();
       }
 
-      return {
-        ...parsed,
-        issues: parsed.issues.map((issue) => ({
-          ...issue,
-          comments: Array.isArray(issue.comments) ? issue.comments : [],
-          relatesTo: Array.isArray(issue.relatesTo) ? issue.relatesTo : []
-        }))
-      };
+      // Нормализуем структуру из localStorage, чтобы исключить поломки UI и мусорные данные.
+      return normalizeStoredData(parsed);
     } catch (error) {
       // Не ломаем приложение, если localStorage повреждён или недоступен.
       console.error('Не удалось прочитать данные из localStorage, используем seed-данные.', error);
