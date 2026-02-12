@@ -1,0 +1,2 @@
+# CapiTask
+Capibara vibe task
