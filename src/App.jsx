@@ -20,6 +20,15 @@ const I18N = {
     allTypes: 'All Types',
     allPriorities: 'All Priorities',
     resetFilters: 'Reset filters',
+    relatedIssues: 'Related issues',
+    noRelatedIssues: 'No related issues yet',
+    relatedSearchPlaceholder: 'Search by key or title',
+    noMatchingIssues: 'No matching issues',
+    comments: 'Comments',
+    commentPlaceholder: 'Write a comment...',
+    addComment: 'Add comment',
+    noComments: 'No comments yet',
+    availableAfterCreate: 'Comments and relations will be available after issue creation',
     switchToList: 'Switch to List',
     switchToBoard: 'Switch to Board',
     createIssue: 'Create Issue',
@@ -77,6 +86,15 @@ const I18N = {
     allTypes: 'Все типы',
     allPriorities: 'Все приоритеты',
     resetFilters: 'Сбросить фильтры',
+    relatedIssues: 'Связанные задачи',
+    noRelatedIssues: 'Пока нет связанных задач',
+    relatedSearchPlaceholder: 'Поиск по ключу или названию',
+    noMatchingIssues: 'Подходящие задачи не найдены',
+    comments: 'Комментарии',
+    commentPlaceholder: 'Напишите комментарий...',
+    addComment: 'Добавить комментарий',
+    noComments: 'Комментариев пока нет',
+    availableAfterCreate: 'Комментарии и связи будут доступны после создания задачи',
     switchToList: 'Переключить на список',
     switchToBoard: 'Переключить на доску',
     createIssue: 'Создать задачу',
@@ -166,6 +184,23 @@ const getInitialLanguage = () => {
   return detectBrowserLanguage();
 };
 
+const formatCommentDate = (isoDate, language) => {
+  if (!isoDate) {
+    return '';
+  }
+
+  try {
+    const locale = language === 'ru' ? 'ru-RU' : 'en-US';
+    return new Date(isoDate).toLocaleString(locale, {
+      dateStyle: 'short',
+      timeStyle: 'short'
+    });
+  } catch (error) {
+    // Если дата повреждена, показываем исходное значение как безопасный fallback.
+    return String(isoDate);
+  }
+};
+
 const SELECT_ARROW_ICON = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22 fill=%22none%22%3E%3Cpath d=%22M1 1.5L6 6.5L11 1.5%22 stroke=%22%23000000%22 stroke-width=%221.6%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3C/svg%3E';
 
 const getSelectStyle = (overrides = {}) => ({
@@ -244,7 +279,8 @@ const seedData = () => {
       dueDate: new Date(Date.now() + (Math.random() * 10 - 5) * 86400000).toISOString().split('T')[0],
       sprintId: i < 10 ? 'S-1' : null,
       epicId: i % 2 === 0 ? 'E-1' : 'E-2',
-      comments: []
+      comments: [],
+      relatesTo: []
     });
   }
 
@@ -307,7 +343,7 @@ const Header = ({ language, onLanguageChange, t }) => {
   );
 };
 
-const Modal = ({ isOpen, onClose, title, children }) => {
+const Modal = ({ isOpen, onClose, title, children, width = '600px' }) => {
   useEffect(() => {
     const handleEscape = (e) => {
       if (e.key === 'Escape') onClose();
@@ -337,8 +373,8 @@ const Modal = ({ isOpen, onClose, title, children }) => {
     }}>
       <div style={{
         background: 'white',
-        width: '600px',
-        maxWidth: '90vw',
+        width,
+        maxWidth: '95vw',
         border: '1px solid var(--text-color)',
         borderRadius: 'var(--radius-lg)',
         padding: '40px',
@@ -447,7 +483,244 @@ const Card = ({ issue, onClick, onDragStart, onDragEnd, t }) => {
   );
 };
 
-const IssuesPage = ({ data, setData, t }) => {
+const IssueCollaborationPanel = ({
+  issue,
+  issues,
+  setData,
+  t,
+  language,
+  relationSearch,
+  setRelationSearch,
+  commentDraft,
+  setCommentDraft
+}) => {
+  if (!issue) {
+    return (
+      <aside style={{
+        alignSelf: 'start',
+        color: '#666',
+        paddingTop: '8px'
+      }}>
+        {t.availableAfterCreate}
+      </aside>
+    );
+  }
+
+  const relatedIssueIds = Array.isArray(issue.relatesTo) ? issue.relatesTo : [];
+  const issueComments = Array.isArray(issue.comments) ? issue.comments : [];
+  const normalizedSearch = relationSearch.trim().toLowerCase();
+  const relationCandidates = issues
+    .filter((candidate) => candidate.id !== issue.id)
+    .filter((candidate) => {
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      return candidate.id.toLowerCase().includes(normalizedSearch)
+        || candidate.title.toLowerCase().includes(normalizedSearch);
+    });
+
+  const handleToggleRelation = (targetIssueId, shouldBeLinked) => {
+    if (!targetIssueId || targetIssueId === issue.id) {
+      return;
+    }
+
+    setData((previousData) => {
+      let hasChanges = false;
+      const updatedIssues = previousData.issues.map((candidate) => {
+        const candidateRelations = Array.isArray(candidate.relatesTo) ? candidate.relatesTo : [];
+
+        if (candidate.id === issue.id) {
+          if (shouldBeLinked) {
+            if (candidateRelations.includes(targetIssueId)) {
+              return candidate;
+            }
+            hasChanges = true;
+            return { ...candidate, relatesTo: [...candidateRelations, targetIssueId] };
+          }
+
+          if (!candidateRelations.includes(targetIssueId)) {
+            return candidate;
+          }
+
+          hasChanges = true;
+          return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== targetIssueId) };
+        }
+
+        if (candidate.id === targetIssueId) {
+          if (shouldBeLinked) {
+            if (candidateRelations.includes(issue.id)) {
+              return candidate;
+            }
+            hasChanges = true;
+            return { ...candidate, relatesTo: [...candidateRelations, issue.id] };
+          }
+
+          if (!candidateRelations.includes(issue.id)) {
+            return candidate;
+          }
+
+          hasChanges = true;
+          return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== issue.id) };
+        }
+
+        return candidate;
+      });
+
+      return hasChanges ? { ...previousData, issues: updatedIssues } : previousData;
+    });
+  };
+
+  const handleAddComment = () => {
+    const normalizedText = commentDraft.trim();
+    if (!normalizedText) {
+      return;
+    }
+
+    const newComment = {
+      id: `CMT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text: normalizedText.slice(0, 1000),
+      author: 'Admin',
+      createdAt: new Date().toISOString()
+    };
+
+    setData((previousData) => ({
+      ...previousData,
+      issues: previousData.issues.map((candidate) => {
+        if (candidate.id !== issue.id) {
+          return candidate;
+        }
+
+        const candidateComments = Array.isArray(candidate.comments) ? candidate.comments : [];
+        return { ...candidate, comments: [...candidateComments, newComment] };
+      })
+    }));
+
+    setCommentDraft('');
+  };
+
+  return (
+    <aside style={{ alignSelf: 'start' }}>
+      <section style={{ marginBottom: '26px', paddingBottom: '18px', borderBottom: '1px solid var(--border-color)' }}>
+        <h3 style={{ fontSize: '14px', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {t.relatedIssues}
+        </h3>
+        <input
+          type="text"
+          value={relationSearch}
+          onChange={(event) => setRelationSearch(event.target.value)}
+          placeholder={t.relatedSearchPlaceholder}
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            fontFamily: 'inherit',
+            marginBottom: '10px'
+          }}
+        />
+
+        {relationCandidates.length === 0 ? (
+          <div style={{ color: '#666', fontSize: '13px' }}>
+            {normalizedSearch ? t.noMatchingIssues : t.noRelatedIssues}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '260px', overflowY: 'auto', paddingRight: '4px' }}>
+            {relationCandidates.map((candidate) => {
+              const isLinked = relatedIssueIds.includes(candidate.id);
+
+              return (
+                <label
+                  key={candidate.id}
+                  style={{
+                    display: 'flex',
+                    gap: '10px',
+                    alignItems: 'flex-start',
+                    paddingBottom: '8px',
+                    borderBottom: '1px solid var(--border-color)',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isLinked}
+                    onChange={(event) => handleToggleRelation(candidate.id, event.target.checked)}
+                    style={{ marginTop: '2px' }}
+                  />
+                  <span style={{ minWidth: '0' }}>
+                    <span style={{ display: 'block', fontWeight: 600, fontSize: '12px' }}>{candidate.id}</span>
+                    <span style={{ display: 'block', fontSize: '12px', color: '#555' }}>{candidate.title}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 style={{ fontSize: '14px', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {t.comments}
+        </h3>
+        <textarea
+          rows="5"
+          value={commentDraft}
+          placeholder={t.commentPlaceholder}
+          onChange={(event) => setCommentDraft(event.target.value)}
+          style={{
+            width: '100%',
+            padding: '10px',
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            fontFamily: 'inherit',
+            resize: 'vertical',
+            marginBottom: '8px',
+            minHeight: '110px'
+          }}
+        />
+        <button
+          type="button"
+          onClick={handleAddComment}
+          disabled={!commentDraft.trim()}
+          style={{
+            border: '1px solid var(--border-color)',
+            borderRadius: '10px',
+            padding: '8px 10px',
+            background: '#fff',
+            color: commentDraft.trim() ? 'var(--text-color)' : '#A0A0A0',
+            cursor: commentDraft.trim() ? 'pointer' : 'not-allowed',
+            marginBottom: '12px'
+          }}
+        >
+          {t.addComment}
+        </button>
+
+        {issueComments.length === 0 ? (
+          <div style={{ color: '#666', fontSize: '13px' }}>{t.noComments}</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '430px', overflowY: 'auto', paddingRight: '4px' }}>
+            {issueComments.map((comment, index) => (
+              <div
+                key={comment.id}
+                style={{
+                  padding: '10px 0',
+                  borderBottom: index === issueComments.length - 1 ? 'none' : '1px solid var(--border-color)'
+                }}
+              >
+                <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>
+                  {comment.author} - {formatCommentDate(comment.createdAt, language)}
+                </div>
+                <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{comment.text}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </aside>
+  );
+};
+
+const IssuesPage = ({ data, setData, t, language }) => {
   const [viewMode, setViewMode] = useState('board');
   const [searchInput, setSearchInput] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -457,6 +730,8 @@ const IssuesPage = ({ data, setData, t }) => {
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
   const [showCapybaraEasterEgg, setShowCapybaraEasterEgg] = useState(false);
+  const [relationSearch, setRelationSearch] = useState('');
+  const [commentDraft, setCommentDraft] = useState('');
   const listEndRef = useRef(null);
 
   const [formData, setFormData] = useState({
@@ -491,6 +766,9 @@ const IssuesPage = ({ data, setData, t }) => {
   };
 
   const openModal = (issue = null) => {
+    setRelationSearch('');
+    setCommentDraft('');
+
     if (issue) {
       setEditingIssue(issue);
       setFormData({
@@ -520,6 +798,8 @@ const IssuesPage = ({ data, setData, t }) => {
   const closeModal = () => {
     setModalOpen(false);
     setEditingIssue(null);
+    setRelationSearch('');
+    setCommentDraft('');
   };
 
   const handleFormSubmit = (e) => {
@@ -538,7 +818,8 @@ const IssuesPage = ({ data, setData, t }) => {
         sprintId: 'S-1',
         epicId: 'E-1',
         reporter: 'Admin',
-        comments: []
+        comments: [],
+        relatesTo: []
       };
       setData({
         ...data,
@@ -574,6 +855,9 @@ const IssuesPage = ({ data, setData, t }) => {
   const progressIssues = filteredIssues.filter(i => i.status === 'In Progress');
   const doneIssues = filteredIssues.filter(i => i.status === 'Done');
   const hasActiveFilters = Boolean(filterType || filterPriority);
+  const currentIssue = editingIssue
+    ? data.issues.find((candidate) => candidate.id === editingIssue.id) || editingIssue
+    : null;
 
   useEffect(() => {
     if (viewMode !== 'list' || filteredIssues.length === 0) {
@@ -846,14 +1130,13 @@ const IssuesPage = ({ data, setData, t }) => {
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: '12px',
-                background: '#FAFAFA'
+                gap: '12px'
               }}>
                 <div style={{ fontWeight: 500 }}>{t.backlogCompleted}</div>
                 <img
                   src="/capibara_chil.png"
                   alt={t.capybaraAlt}
-                  style={{ maxWidth: '320px', width: '100%', borderRadius: '16px' }}
+                  style={{ maxWidth: '108px', width: '100%', borderRadius: '12px' }}
                 />
               </div>
             )}
@@ -861,202 +1144,218 @@ const IssuesPage = ({ data, setData, t }) => {
         </div>
       )}
 
-      <Modal isOpen={modalOpen} onClose={closeModal} title={editingIssue ? `${t.editIssue} ${editingIssue.id}` : t.createIssue}>
+      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.editIssue} ${currentIssue.id}` : t.createIssue} width="1240px">
         <form onSubmit={handleFormSubmit}>
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{
-              display: 'block',
-              marginBottom: '8px',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}>{t.summary}</label>
-            <input
-              type="text"
-              required
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '12px',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                fontFamily: 'inherit'
-              }}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 430px', gap: '28px', alignItems: 'start' }}>
+            <div>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>{t.summary}</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>{t.type}</label>
+                  <select
+                    value={formData.type}
+                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                    style={getSelectStyle({
+                      width: '100%',
+                      padding: '12px 40px 12px 12px',
+                      borderRadius: '8px'
+                    })}
+                  >
+                    <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
+                    <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
+                    <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>{t.priority}</label>
+                  <select
+                    value={formData.priority}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                    style={getSelectStyle({
+                      width: '100%',
+                      padding: '12px 40px 12px 12px',
+                      borderRadius: '8px'
+                    })}
+                  >
+                    <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
+                    <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
+                    <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>{t.description}</label>
+                <textarea
+                  rows="4"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>{t.storyPoints}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.storyPoints}
+                    onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      fontFamily: 'inherit'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>{t.dueDate}</label>
+                  <input
+                    type="date"
+                    value={formData.dueDate}
+                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      fontFamily: 'inherit'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>{t.assignee}</label>
+                <input
+                  type="text"
+                  placeholder={t.assigneePlaceholder}
+                  value={formData.assignee}
+                  onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </div>
+
+              <div style={{ textAlign: 'right' }}>
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  style={{
+                    border: '1px solid var(--border-color)',
+                    padding: '10px 20px',
+                    borderRadius: 'var(--radius-lg)',
+                    fontFamily: 'inherit',
+                    cursor: 'pointer',
+                    background: 'none',
+                    fontSize: '1rem',
+                    marginRight: '12px'
+                  }}
+                >
+                  {t.cancel}
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    backgroundColor: 'var(--accent-color)',
+                    color: 'var(--text-color)',
+                    padding: '12px 24px',
+                    borderRadius: 'var(--radius-lg)',
+                    fontWeight: 500,
+                    border: 'none',
+                    fontFamily: 'inherit',
+                    cursor: 'pointer',
+                    fontSize: '1rem'
+                  }}
+                >
+                  {t.saveIssue}
+                </button>
+              </div>
+            </div>
+
+            <IssueCollaborationPanel
+              issue={currentIssue}
+              issues={data.issues}
+              setData={setData}
+              t={t}
+              language={language}
+              relationSearch={relationSearch}
+              setRelationSearch={setRelationSearch}
+              commentDraft={commentDraft}
+              setCommentDraft={setCommentDraft}
             />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-            <div>
-              <label style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>{t.type}</label>
-              <select
-                value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                style={getSelectStyle({
-                  width: '100%',
-                  padding: '12px 40px 12px 12px',
-                  borderRadius: '8px'
-                })}
-              >
-                <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
-                <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
-                <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
-              </select>
-            </div>
-            <div>
-              <label style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>{t.priority}</label>
-              <select
-                value={formData.priority}
-                onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                style={getSelectStyle({
-                  width: '100%',
-                  padding: '12px 40px 12px 12px',
-                  borderRadius: '8px'
-                })}
-              >
-                <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
-                <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
-                <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{
-              display: 'block',
-              marginBottom: '8px',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}>{t.description}</label>
-            <textarea
-              rows="4"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '12px',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                fontFamily: 'inherit'
-              }}
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-            <div>
-              <label style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>{t.storyPoints}</label>
-              <input
-                type="number"
-                min="0"
-                value={formData.storyPoints}
-                onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value) || 0 })}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontFamily: 'inherit'
-                }}
-              />
-            </div>
-            <div>
-              <label style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>{t.dueDate}</label>
-              <input
-                type="date"
-                value={formData.dueDate}
-                onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontFamily: 'inherit'
-                }}
-              />
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{
-              display: 'block',
-              marginBottom: '8px',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}>{t.assignee}</label>
-            <input
-              type="text"
-              placeholder={t.assigneePlaceholder}
-              value={formData.assignee}
-              onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '12px',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                fontFamily: 'inherit'
-              }}
-            />
-          </div>
-
-          <div style={{ textAlign: 'right' }}>
-            <button
-              type="button"
-              onClick={closeModal}
-              style={{
-                border: '1px solid var(--border-color)',
-                padding: '10px 20px',
-                borderRadius: 'var(--radius-lg)',
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                background: 'none',
-                fontSize: '1rem',
-                marginRight: '12px'
-              }}
-            >
-              {t.cancel}
-            </button>
-            <button
-              type="submit"
-              style={{
-                backgroundColor: 'var(--accent-color)',
-                color: 'var(--text-color)',
-                padding: '12px 24px',
-                borderRadius: 'var(--radius-lg)',
-                fontWeight: 500,
-                border: 'none',
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                fontSize: '1rem'
-              }}
-            >
-              {t.saveIssue}
-            </button>
           </div>
         </form>
       </Modal>
@@ -1064,11 +1363,13 @@ const IssuesPage = ({ data, setData, t }) => {
   );
 };
 
-const SprintPage = ({ data, setData, t }) => {
+const SprintPage = ({ data, setData, t, language }) => {
   const [sprintSearch, setSprintSearch] = useState('');
   const [sortField, setSortField] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingIssue, setEditingIssue] = useState(null);
+  const [relationSearch, setRelationSearch] = useState('');
+  const [commentDraft, setCommentDraft] = useState('');
 
   const [formData, setFormData] = useState({
     title: '',
@@ -1102,6 +1403,8 @@ const SprintPage = ({ data, setData, t }) => {
   };
 
   const openModal = (issue) => {
+    setRelationSearch('');
+    setCommentDraft('');
     setEditingIssue(issue);
     setFormData({
       title: issue.title,
@@ -1118,6 +1421,8 @@ const SprintPage = ({ data, setData, t }) => {
   const closeModal = () => {
     setModalOpen(false);
     setEditingIssue(null);
+    setRelationSearch('');
+    setCommentDraft('');
   };
 
   const handleFormSubmit = (e) => {
@@ -1160,6 +1465,9 @@ const SprintPage = ({ data, setData, t }) => {
 
   const sprintIssues = getSprintIssues();
   const totalSP = sprintIssues.reduce((sum, i) => sum + (parseInt(i.storyPoints) || 0), 0);
+  const currentIssue = editingIssue
+    ? data.issues.find((candidate) => candidate.id === editingIssue.id) || editingIssue
+    : null;
 
   return (
     <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -1315,202 +1623,218 @@ const SprintPage = ({ data, setData, t }) => {
         </div>
       </div>
 
-      <Modal isOpen={modalOpen} onClose={closeModal} title={editingIssue ? `${t.editIssue} ${editingIssue.id}` : t.createIssue}>
+      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.editIssue} ${currentIssue.id}` : t.createIssue} width="1240px">
         <form onSubmit={handleFormSubmit}>
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{
-              display: 'block',
-              marginBottom: '8px',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}>{t.summary}</label>
-            <input
-              type="text"
-              required
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '12px',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                fontFamily: 'inherit'
-              }}
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 430px', gap: '28px', alignItems: 'start' }}>
+            <div>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>{t.summary}</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>{t.type}</label>
+                  <select
+                    value={formData.type}
+                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                    style={getSelectStyle({
+                      width: '100%',
+                      padding: '12px 40px 12px 12px',
+                      borderRadius: '8px'
+                    })}
+                  >
+                    <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
+                    <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
+                    <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>{t.priority}</label>
+                  <select
+                    value={formData.priority}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                    style={getSelectStyle({
+                      width: '100%',
+                      padding: '12px 40px 12px 12px',
+                      borderRadius: '8px'
+                    })}
+                  >
+                    <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
+                    <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
+                    <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>{t.description}</label>
+                <textarea
+                  rows="4"
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>{t.storyPoints}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={formData.storyPoints}
+                    onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      fontFamily: 'inherit'
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '12px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>{t.dueDate}</label>
+                  <input
+                    type="date"
+                    value={formData.dueDate}
+                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '8px',
+                      fontFamily: 'inherit'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em'
+                }}>{t.assignee}</label>
+                <input
+                  type="text"
+                  placeholder={t.assigneePlaceholder}
+                  value={formData.assignee}
+                  onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '8px',
+                    fontFamily: 'inherit'
+                  }}
+                />
+              </div>
+
+              <div style={{ textAlign: 'right' }}>
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  style={{
+                    border: '1px solid var(--border-color)',
+                    padding: '10px 20px',
+                    borderRadius: 'var(--radius-lg)',
+                    fontFamily: 'inherit',
+                    cursor: 'pointer',
+                    background: 'none',
+                    fontSize: '1rem',
+                    marginRight: '12px'
+                  }}
+                >
+                  {t.cancel}
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    backgroundColor: 'var(--accent-color)',
+                    color: 'var(--text-color)',
+                    padding: '12px 24px',
+                    borderRadius: 'var(--radius-lg)',
+                    fontWeight: 500,
+                    border: 'none',
+                    fontFamily: 'inherit',
+                    cursor: 'pointer',
+                    fontSize: '1rem'
+                  }}
+                >
+                  {t.saveIssue}
+                </button>
+              </div>
+            </div>
+
+            <IssueCollaborationPanel
+              issue={currentIssue}
+              issues={data.issues}
+              setData={setData}
+              t={t}
+              language={language}
+              relationSearch={relationSearch}
+              setRelationSearch={setRelationSearch}
+              commentDraft={commentDraft}
+              setCommentDraft={setCommentDraft}
             />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-            <div>
-              <label style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>{t.type}</label>
-              <select
-                value={formData.type}
-                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                style={getSelectStyle({
-                  width: '100%',
-                  padding: '12px 40px 12px 12px',
-                  borderRadius: '8px'
-                })}
-              >
-                <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
-                <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
-                <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
-              </select>
-            </div>
-            <div>
-              <label style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>{t.priority}</label>
-              <select
-                value={formData.priority}
-                onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                style={getSelectStyle({
-                  width: '100%',
-                  padding: '12px 40px 12px 12px',
-                  borderRadius: '8px'
-                })}
-              >
-                <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
-                <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
-                <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
-              </select>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{
-              display: 'block',
-              marginBottom: '8px',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}>{t.description}</label>
-            <textarea
-              rows="4"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '12px',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                fontFamily: 'inherit'
-              }}
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
-            <div>
-              <label style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>{t.storyPoints}</label>
-              <input
-                type="number"
-                min="0"
-                value={formData.storyPoints}
-                onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value) || 0 })}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontFamily: 'inherit'
-                }}
-              />
-            </div>
-            <div>
-              <label style={{
-                display: 'block',
-                marginBottom: '8px',
-                fontSize: '12px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}>{t.dueDate}</label>
-              <input
-                type="date"
-                value={formData.dueDate}
-                onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontFamily: 'inherit'
-                }}
-              />
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '20px' }}>
-            <label style={{
-              display: 'block',
-              marginBottom: '8px',
-              fontSize: '12px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}>{t.assignee}</label>
-            <input
-              type="text"
-              placeholder={t.assigneePlaceholder}
-              value={formData.assignee}
-              onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '12px',
-                border: '1px solid var(--border-color)',
-                borderRadius: '8px',
-                fontFamily: 'inherit'
-              }}
-            />
-          </div>
-
-          <div style={{ textAlign: 'right' }}>
-            <button
-              type="button"
-              onClick={closeModal}
-              style={{
-                border: '1px solid var(--border-color)',
-                padding: '10px 20px',
-                borderRadius: 'var(--radius-lg)',
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                background: 'none',
-                fontSize: '1rem',
-                marginRight: '12px'
-              }}
-            >
-              {t.cancel}
-            </button>
-            <button
-              type="submit"
-              style={{
-                backgroundColor: 'var(--accent-color)',
-                color: 'var(--text-color)',
-                padding: '12px 24px',
-                borderRadius: 'var(--radius-lg)',
-                fontWeight: 500,
-                border: 'none',
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                fontSize: '1rem'
-              }}
-            >
-              {t.saveIssue}
-            </button>
           </div>
         </form>
       </Modal>
@@ -1532,7 +1856,14 @@ const App = () => {
         return seedData();
       }
 
-      return parsed;
+      return {
+        ...parsed,
+        issues: parsed.issues.map((issue) => ({
+          ...issue,
+          comments: Array.isArray(issue.comments) ? issue.comments : [],
+          relatesTo: Array.isArray(issue.relatesTo) ? issue.relatesTo : []
+        }))
+      };
     } catch (error) {
       // Не ломаем приложение, если localStorage повреждён или недоступен.
       console.error('Не удалось прочитать данные из localStorage, используем seed-данные.', error);
@@ -1573,8 +1904,8 @@ const App = () => {
       <div style={customStyles.root}>
         <Header language={language} onLanguageChange={handleLanguageChange} t={t} />
         <Routes>
-          <Route path="/" element={<IssuesPage data={data} setData={setData} t={t} />} />
-          <Route path="/sprint" element={<SprintPage data={data} setData={setData} t={t} />} />
+          <Route path="/" element={<IssuesPage data={data} setData={setData} t={t} language={language} />} />
+          <Route path="/sprint" element={<SprintPage data={data} setData={setData} t={t} language={language} />} />
         </Routes>
       </div>
     </Router>
