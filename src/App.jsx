@@ -2,8 +2,168 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 
 const STORAGE_KEY = 'capitask_data';
+const LANGUAGE_STORAGE_KEY = 'capitask_language';
 const LIST_BOTTOM_THRESHOLD_PX = 8;
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@'];
+const DEFAULT_LANGUAGE = 'en';
+
+const I18N = {
+  en: {
+    issuesNav: 'Issues',
+    activeSprintNav: 'Active Sprint',
+    language: 'Language',
+    languageNames: {
+      en: 'English',
+      ru: 'Russian'
+    },
+    backlog: 'Backlog',
+    searchIssues: 'Search issues...',
+    allTypes: 'All Types',
+    allPriorities: 'All Priorities',
+    switchToList: 'Switch to List',
+    switchToBoard: 'Switch to Board',
+    createIssue: 'Create Issue',
+    key: 'Key',
+    summary: 'Summary',
+    priority: 'Priority',
+    status: 'Status',
+    assignee: 'Assignee',
+    due: 'Due',
+    type: 'Type',
+    description: 'Description',
+    storyPoints: 'Story Points',
+    dueDate: 'Due Date',
+    assigneePlaceholder: 'John Doe',
+    cancel: 'Cancel',
+    saveIssue: 'Save Issue',
+    editIssue: 'Edit',
+    sprintTag: 'Sprint',
+    pointsShort: 'pts',
+    backlogCompleted: 'Great, you reached the end of backlog',
+    capybaraAlt: 'Capybara at the end of tasks list',
+    sprintBoard: 'Sprint Board',
+    goal: 'Goal',
+    filterSprint: 'Filter sprint...',
+    exportCsv: 'Export CSV',
+    actions: 'Actions',
+    edit: 'Edit',
+    typeLabels: {
+      Task: 'Task',
+      Bug: 'Bug',
+      Story: 'Story'
+    },
+    priorityLabels: {
+      High: 'High',
+      Medium: 'Medium',
+      Low: 'Low'
+    },
+    statusLabels: {
+      'To Do': 'To Do',
+      'In Progress': 'In Progress',
+      Done: 'Done'
+    },
+    csvHeaders: ['ID', 'Title', 'Type', 'Status', 'Points', 'Assignee']
+  },
+  ru: {
+    issuesNav: 'Задачи',
+    activeSprintNav: 'Активный спринт',
+    language: 'Язык',
+    languageNames: {
+      en: 'English',
+      ru: 'Русский'
+    },
+    backlog: 'Бэклог',
+    searchIssues: 'Поиск задач...',
+    allTypes: 'Все типы',
+    allPriorities: 'Все приоритеты',
+    switchToList: 'Переключить на список',
+    switchToBoard: 'Переключить на доску',
+    createIssue: 'Создать задачу',
+    key: 'Ключ',
+    summary: 'Сводка',
+    priority: 'Приоритет',
+    status: 'Статус',
+    assignee: 'Исполнитель',
+    due: 'Срок',
+    type: 'Тип',
+    description: 'Описание',
+    storyPoints: 'Стори поинты',
+    dueDate: 'Дата дедлайна',
+    assigneePlaceholder: 'Иван Иванов',
+    cancel: 'Отмена',
+    saveIssue: 'Сохранить задачу',
+    editIssue: 'Редактировать',
+    sprintTag: 'Спринт',
+    pointsShort: 'балл.',
+    backlogCompleted: 'Поздравляем, весь backlog просмотрен',
+    capybaraAlt: 'Капибара в конце списка задач',
+    sprintBoard: 'Доска спринта',
+    goal: 'Цель',
+    filterSprint: 'Фильтр спринта...',
+    exportCsv: 'Экспорт CSV',
+    actions: 'Действия',
+    edit: 'Изменить',
+    typeLabels: {
+      Task: 'Задача',
+      Bug: 'Баг',
+      Story: 'История'
+    },
+    priorityLabels: {
+      High: 'Высокий',
+      Medium: 'Средний',
+      Low: 'Низкий'
+    },
+    statusLabels: {
+      'To Do': 'К выполнению',
+      'In Progress': 'В работе',
+      Done: 'Готово'
+    },
+    csvHeaders: ['ID', 'Название', 'Тип', 'Статус', 'Баллы', 'Исполнитель']
+  }
+};
+
+const resolveLanguage = (value) => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalizedValue = value.trim().toLowerCase();
+  if (normalizedValue.startsWith('ru')) {
+    return 'ru';
+  }
+
+  if (normalizedValue.startsWith('en')) {
+    return 'en';
+  }
+
+  return null;
+};
+
+const detectBrowserLanguage = () => {
+  if (typeof navigator === 'undefined') {
+    return DEFAULT_LANGUAGE;
+  }
+
+  const browserLanguage = navigator.languages?.[0] ?? navigator.language;
+  return resolveLanguage(browserLanguage) ?? DEFAULT_LANGUAGE;
+};
+
+const getTranslatedLabel = (labels, value) => labels?.[value] ?? value;
+
+const getInitialLanguage = () => {
+  try {
+    const storedLanguage = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    const resolvedStoredLanguage = resolveLanguage(storedLanguage);
+    if (resolvedStoredLanguage) {
+      return resolvedStoredLanguage;
+    }
+  } catch (error) {
+    // Если localStorage недоступен, продолжаем с языком браузера.
+    console.error('Не удалось прочитать сохранённый язык интерфейса.', error);
+  }
+
+  return detectBrowserLanguage();
+};
 
 const customStyles = {
   root: {
@@ -67,7 +227,7 @@ const seedData = () => {
   return { epics, sprint, issues, lastId: 15 };
 };
 
-const Header = () => {
+const Header = ({ language, onLanguageChange, t }) => {
   return (
     <header style={{
       display: 'flex',
@@ -85,22 +245,41 @@ const Header = () => {
         fontWeight: 500,
         letterSpacing: '-0.03em'
       }}>Capitask</div>
-      <nav>
-        <Link to="/" style={{
-          textDecoration: 'none',
-          color: 'var(--text-color)',
-          marginLeft: '32px',
-          fontWeight: 400,
-          position: 'relative'
-        }}>Issues</Link>
-        <Link to="/sprint" style={{
-          textDecoration: 'none',
-          color: 'var(--text-color)',
-          marginLeft: '32px',
-          fontWeight: 400,
-          position: 'relative'
-        }}>Active Sprint</Link>
-      </nav>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+        <nav>
+          <Link to="/" style={{
+            textDecoration: 'none',
+            color: 'var(--text-color)',
+            marginLeft: '32px',
+            fontWeight: 400,
+            position: 'relative'
+          }}>{t.issuesNav}</Link>
+          <Link to="/sprint" style={{
+            textDecoration: 'none',
+            color: 'var(--text-color)',
+            marginLeft: '32px',
+            fontWeight: 400,
+            position: 'relative'
+          }}>{t.activeSprintNav}</Link>
+        </nav>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}>
+          <span>{t.language}</span>
+          <select
+            value={language}
+            onChange={(event) => onLanguageChange(event.target.value)}
+            style={{
+              padding: '6px 10px',
+              border: '1px solid var(--border-color)',
+              borderRadius: '10px',
+              background: '#fff',
+              fontFamily: 'inherit'
+            }}
+          >
+            <option value="en">{t.languageNames.en}</option>
+            <option value="ru">{t.languageNames.ru}</option>
+          </select>
+        </label>
+      </div>
     </header>
   );
 };
@@ -157,7 +336,7 @@ const Modal = ({ isOpen, onClose, title, children }) => {
   );
 };
 
-const Card = ({ issue, onClick, onDragStart, onDragEnd }) => {
+const Card = ({ issue, onClick, onDragStart, onDragEnd, t }) => {
   return (
     <div
       draggable
@@ -191,7 +370,7 @@ const Card = ({ issue, onClick, onDragStart, onDragEnd }) => {
         color: '#666'
       }}>
         <span>{issue.id}</span>
-        <span>{issue.priority}</span>
+        <span>{getTranslatedLabel(t.priorityLabels, issue.priority)}</span>
       </div>
       <div style={{
         fontSize: '16px',
@@ -218,7 +397,7 @@ const Card = ({ issue, onClick, onDragStart, onDragEnd }) => {
             color: 'black',
             textTransform: 'uppercase',
             letterSpacing: '0.05em'
-          }}>Sprint</span>
+          }}>{t.sprintTag}</span>
         )}
       </div>
       <div style={{
@@ -239,13 +418,13 @@ const Card = ({ issue, onClick, onDragStart, onDragEnd }) => {
           justifyContent: 'center',
           fontSize: '10px'
         }} title={issue.assignee}>{issue.assignee.charAt(0)}</div>
-        <span>{issue.storyPoints} pts</span>
+        <span>{issue.storyPoints} {t.pointsShort}</span>
       </div>
     </div>
   );
 };
 
-const IssuesPage = ({ data, setData }) => {
+const IssuesPage = ({ data, setData, t }) => {
   const [viewMode, setViewMode] = useState('board');
   const [searchInput, setSearchInput] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -386,7 +565,7 @@ const IssuesPage = ({ data, setData }) => {
   return (
     <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '3rem', marginBottom: '24px', lineHeight: 1, fontWeight: 500, letterSpacing: '-0.02em' }}>
-        Backlog <span style={{ fontSize: '0.6em', verticalAlign: 'super', marginLeft: '2px', fontWeight: 400 }}>{filteredIssues.length}</span>
+        {t.backlog} <span style={{ fontSize: '0.6em', verticalAlign: 'super', marginLeft: '2px', fontWeight: 400 }}>{filteredIssues.length}</span>
       </h1>
       
       <div style={{
@@ -400,7 +579,7 @@ const IssuesPage = ({ data, setData }) => {
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <input
             type="text"
-            placeholder="Search issues..."
+            placeholder={t.searchIssues}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             style={{
@@ -426,10 +605,10 @@ const IssuesPage = ({ data, setData }) => {
               minWidth: '150px'
             }}
           >
-            <option value="">All Types</option>
-            <option value="Task">Task</option>
-            <option value="Bug">Bug</option>
-            <option value="Story">Story</option>
+            <option value="">{t.allTypes}</option>
+            <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
+            <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
+            <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
           </select>
           <select
             value={filterPriority}
@@ -444,10 +623,10 @@ const IssuesPage = ({ data, setData }) => {
               minWidth: '150px'
             }}
           >
-            <option value="">All Priorities</option>
-            <option value="High">High</option>
-            <option value="Medium">Medium</option>
-            <option value="Low">Low</option>
+            <option value="">{t.allPriorities}</option>
+            <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
+            <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
+            <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
           </select>
         </div>
         <div>
@@ -463,7 +642,7 @@ const IssuesPage = ({ data, setData }) => {
               fontSize: '1rem'
             }}
           >
-            {viewMode === 'board' ? 'Switch to List' : 'Switch to Board'}
+            {viewMode === 'board' ? t.switchToList : t.switchToBoard}
           </button>
           <button
             onClick={() => openModal()}
@@ -480,7 +659,7 @@ const IssuesPage = ({ data, setData }) => {
               marginLeft: '12px'
             }}
           >
-            + Create Issue
+            + {t.createIssue}
           </button>
         </div>
       </div>
@@ -525,13 +704,14 @@ const IssuesPage = ({ data, setData }) => {
                 display: 'flex',
                 alignItems: 'baseline'
               }}>
-                {status} <span style={{ fontSize: '0.6em', verticalAlign: 'super', marginLeft: '2px', fontWeight: 400 }}>{count}</span>
+                {getTranslatedLabel(t.statusLabels, status)} <span style={{ fontSize: '0.6em', verticalAlign: 'super', marginLeft: '2px', fontWeight: 400 }}>{count}</span>
               </div>
               <div style={{ flex: 1, overflowY: 'auto', minHeight: '100px' }}>
                 {issues.map(issue => (
                   <Card
                     key={issue.id}
                     issue={issue}
+                    t={t}
                     onClick={() => openModal(issue)}
                     onDragStart={(e) => {
                       handleDragStart(issue);
@@ -555,12 +735,12 @@ const IssuesPage = ({ data, setData }) => {
             borderBottom: '1px solid var(--text-color)',
             fontWeight: 600
           }}>
-            <div>Key</div>
-            <div>Summary</div>
-            <div>Priority</div>
-            <div>Status</div>
-            <div>Assignee</div>
-            <div>Due</div>
+            <div>{t.key}</div>
+            <div>{t.summary}</div>
+            <div>{t.priority}</div>
+            <div>{t.status}</div>
+            <div>{t.assignee}</div>
+            <div>{t.due}</div>
           </div>
           <div
             onScroll={handleListScroll}
@@ -598,9 +778,9 @@ const IssuesPage = ({ data, setData }) => {
                       background: '#F0F0F0',
                       textTransform: 'uppercase',
                       letterSpacing: '0.05em'
-                    }}>{issue.priority}</span>
+                    }}>{getTranslatedLabel(t.priorityLabels, issue.priority)}</span>
                   </div>
-                  <div>{issue.status}</div>
+                  <div>{getTranslatedLabel(t.statusLabels, issue.status)}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <div style={{
                       width: '24px',
@@ -630,10 +810,10 @@ const IssuesPage = ({ data, setData }) => {
                 gap: '12px',
                 background: '#FAFAFA'
               }}>
-                <div style={{ fontWeight: 500 }}>Поздравляем, весь backlog просмотрен</div>
+                <div style={{ fontWeight: 500 }}>{t.backlogCompleted}</div>
                 <img
                   src="/capibara_chil.png"
-                  alt="Капибара в конце списка задач"
+                  alt={t.capybaraAlt}
                   style={{ maxWidth: '320px', width: '100%', borderRadius: '16px' }}
                 />
               </div>
@@ -642,7 +822,7 @@ const IssuesPage = ({ data, setData }) => {
         </div>
       )}
 
-      <Modal isOpen={modalOpen} onClose={closeModal} title={editingIssue ? `Edit ${editingIssue.id}` : 'Create Issue'}>
+      <Modal isOpen={modalOpen} onClose={closeModal} title={editingIssue ? `${t.editIssue} ${editingIssue.id}` : t.createIssue}>
         <form onSubmit={handleFormSubmit}>
           <div style={{ marginBottom: '20px' }}>
             <label style={{
@@ -651,7 +831,7 @@ const IssuesPage = ({ data, setData }) => {
               fontSize: '12px',
               textTransform: 'uppercase',
               letterSpacing: '0.05em'
-            }}>Summary</label>
+            }}>{t.summary}</label>
             <input
               type="text"
               required
@@ -675,7 +855,7 @@ const IssuesPage = ({ data, setData }) => {
                 fontSize: '12px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em'
-              }}>Type</label>
+              }}>{t.type}</label>
               <select
                 value={formData.type}
                 onChange={(e) => setFormData({ ...formData, type: e.target.value })}
@@ -687,9 +867,9 @@ const IssuesPage = ({ data, setData }) => {
                   fontFamily: 'inherit'
                 }}
               >
-                <option value="Task">Task</option>
-                <option value="Bug">Bug</option>
-                <option value="Story">Story</option>
+                <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
+                <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
+                <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
               </select>
             </div>
             <div>
@@ -699,7 +879,7 @@ const IssuesPage = ({ data, setData }) => {
                 fontSize: '12px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em'
-              }}>Priority</label>
+              }}>{t.priority}</label>
               <select
                 value={formData.priority}
                 onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
@@ -711,9 +891,9 @@ const IssuesPage = ({ data, setData }) => {
                   fontFamily: 'inherit'
                 }}
               >
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
+                <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
+                <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
+                <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
               </select>
             </div>
           </div>
@@ -725,7 +905,7 @@ const IssuesPage = ({ data, setData }) => {
               fontSize: '12px',
               textTransform: 'uppercase',
               letterSpacing: '0.05em'
-            }}>Description</label>
+            }}>{t.description}</label>
             <textarea
               rows="4"
               value={formData.description}
@@ -748,7 +928,7 @@ const IssuesPage = ({ data, setData }) => {
                 fontSize: '12px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em'
-              }}>Story Points</label>
+              }}>{t.storyPoints}</label>
               <input
                 type="number"
                 min="0"
@@ -770,7 +950,7 @@ const IssuesPage = ({ data, setData }) => {
                 fontSize: '12px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em'
-              }}>Due Date</label>
+              }}>{t.dueDate}</label>
               <input
                 type="date"
                 value={formData.dueDate}
@@ -793,10 +973,10 @@ const IssuesPage = ({ data, setData }) => {
               fontSize: '12px',
               textTransform: 'uppercase',
               letterSpacing: '0.05em'
-            }}>Assignee</label>
+            }}>{t.assignee}</label>
             <input
               type="text"
-              placeholder="John Doe"
+              placeholder={t.assigneePlaceholder}
               value={formData.assignee}
               onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
               style={{
@@ -824,7 +1004,7 @@ const IssuesPage = ({ data, setData }) => {
                 marginRight: '12px'
               }}
             >
-              Cancel
+              {t.cancel}
             </button>
             <button
               type="submit"
@@ -840,7 +1020,7 @@ const IssuesPage = ({ data, setData }) => {
                 fontSize: '1rem'
               }}
             >
-              Save Issue
+              {t.saveIssue}
             </button>
           </div>
         </form>
@@ -849,7 +1029,7 @@ const IssuesPage = ({ data, setData }) => {
   );
 };
 
-const SprintPage = ({ data, setData }) => {
+const SprintPage = ({ data, setData, t }) => {
   const [sprintSearch, setSprintSearch] = useState('');
   const [sortField, setSortField] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -918,8 +1098,15 @@ const SprintPage = ({ data, setData }) => {
 
   const exportCSV = () => {
     const issues = data.issues.filter(i => i.sprintId === data.sprint.id);
-    const headers = ['ID', 'Title', 'Type', 'Status', 'Points', 'Assignee'];
-    const rows = issues.map(i => [i.id, i.title, i.type, i.status, i.storyPoints, i.assignee]);
+    const headers = t.csvHeaders;
+    const rows = issues.map(i => [
+      i.id,
+      i.title,
+      getTranslatedLabel(t.typeLabels, i.type),
+      getTranslatedLabel(t.statusLabels, i.status),
+      i.storyPoints,
+      i.assignee
+    ]);
 
     const csvText = [
       headers.map(escapeCsvCell).join(','),
@@ -942,7 +1129,7 @@ const SprintPage = ({ data, setData }) => {
   return (
     <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '3rem', marginBottom: '24px', lineHeight: 1, fontWeight: 500, letterSpacing: '-0.02em' }}>
-        Sprint Board
+        {t.sprintBoard}
       </h1>
       
       <div style={{
@@ -956,7 +1143,7 @@ const SprintPage = ({ data, setData }) => {
       }}>
         <div>
           <h2 style={{ fontSize: '1.5rem', marginBottom: '16px' }}>{data.sprint.name}</h2>
-          <p style={{ color: '#666', marginBottom: '8px' }}>Goal: {data.sprint.goal}</p>
+          <p style={{ color: '#666', marginBottom: '8px' }}>{t.goal}: {data.sprint.goal}</p>
           <p style={{ fontSize: '14px' }}>{data.sprint.startDate} - {data.sprint.endDate}</p>
         </div>
         <div style={{ textAlign: 'right' }}>
@@ -965,7 +1152,7 @@ const SprintPage = ({ data, setData }) => {
             fontSize: '12px',
             textTransform: 'uppercase',
             letterSpacing: '0.05em'
-          }}>Story Points</div>
+          }}>{t.storyPoints}</div>
         </div>
       </div>
 
@@ -980,7 +1167,7 @@ const SprintPage = ({ data, setData }) => {
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <input
             type="text"
-            placeholder="Filter sprint..."
+            placeholder={t.filterSprint}
             value={sprintSearch}
             onChange={(e) => setSprintSearch(e.target.value)}
             style={{
@@ -1006,7 +1193,7 @@ const SprintPage = ({ data, setData }) => {
             fontSize: '1rem'
           }}
         >
-          Export CSV
+          {t.exportCsv}
         </button>
       </div>
 
@@ -1020,12 +1207,12 @@ const SprintPage = ({ data, setData }) => {
           borderBottom: '1px solid var(--text-color)',
           fontWeight: 600
         }}>
-          <div style={{ cursor: 'pointer' }} onClick={() => setSortField('id')}>Key ↕</div>
-          <div style={{ cursor: 'pointer' }} onClick={() => setSortField('title')}>Summary ↕</div>
-          <div style={{ cursor: 'pointer' }} onClick={() => setSortField('priority')}>Priority ↕</div>
-          <div style={{ cursor: 'pointer' }} onClick={() => setSortField('status')}>Status ↕</div>
-          <div>Assignee</div>
-          <div>Actions</div>
+          <div style={{ cursor: 'pointer' }} onClick={() => setSortField('id')}>{t.key} ↕</div>
+          <div style={{ cursor: 'pointer' }} onClick={() => setSortField('title')}>{t.summary} ↕</div>
+          <div style={{ cursor: 'pointer' }} onClick={() => setSortField('priority')}>{t.priority} ↕</div>
+          <div style={{ cursor: 'pointer' }} onClick={() => setSortField('status')}>{t.status} ↕</div>
+          <div>{t.assignee}</div>
+          <div>{t.actions}</div>
         </div>
         <div>
           {sprintIssues.map(issue => (
@@ -1052,7 +1239,7 @@ const SprintPage = ({ data, setData }) => {
                   background: '#F0F0F0',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em'
-                }}>{issue.priority}</span>
+                }}>{getTranslatedLabel(t.priorityLabels, issue.priority)}</span>
               </div>
               <div>
                 <select
@@ -1066,9 +1253,9 @@ const SprintPage = ({ data, setData }) => {
                     fontFamily: 'inherit'
                   }}
                 >
-                  <option>To Do</option>
-                  <option>In Progress</option>
-                  <option>Done</option>
+                  <option value="To Do">{getTranslatedLabel(t.statusLabels, 'To Do')}</option>
+                  <option value="In Progress">{getTranslatedLabel(t.statusLabels, 'In Progress')}</option>
+                  <option value="Done">{getTranslatedLabel(t.statusLabels, 'Done')}</option>
                 </select>
               </div>
               <div>{issue.assignee}</div>
@@ -1085,7 +1272,7 @@ const SprintPage = ({ data, setData }) => {
                     fontSize: '12px'
                   }}
                 >
-                  Edit
+                  {t.edit}
                 </button>
               </div>
             </div>
@@ -1093,7 +1280,7 @@ const SprintPage = ({ data, setData }) => {
         </div>
       </div>
 
-      <Modal isOpen={modalOpen} onClose={closeModal} title={editingIssue ? `Edit ${editingIssue.id}` : 'Create Issue'}>
+      <Modal isOpen={modalOpen} onClose={closeModal} title={editingIssue ? `${t.editIssue} ${editingIssue.id}` : t.createIssue}>
         <form onSubmit={handleFormSubmit}>
           <div style={{ marginBottom: '20px' }}>
             <label style={{
@@ -1102,7 +1289,7 @@ const SprintPage = ({ data, setData }) => {
               fontSize: '12px',
               textTransform: 'uppercase',
               letterSpacing: '0.05em'
-            }}>Summary</label>
+            }}>{t.summary}</label>
             <input
               type="text"
               required
@@ -1126,7 +1313,7 @@ const SprintPage = ({ data, setData }) => {
                 fontSize: '12px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em'
-              }}>Type</label>
+              }}>{t.type}</label>
               <select
                 value={formData.type}
                 onChange={(e) => setFormData({ ...formData, type: e.target.value })}
@@ -1138,9 +1325,9 @@ const SprintPage = ({ data, setData }) => {
                   fontFamily: 'inherit'
                 }}
               >
-                <option value="Task">Task</option>
-                <option value="Bug">Bug</option>
-                <option value="Story">Story</option>
+                <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
+                <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
+                <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
               </select>
             </div>
             <div>
@@ -1150,7 +1337,7 @@ const SprintPage = ({ data, setData }) => {
                 fontSize: '12px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em'
-              }}>Priority</label>
+              }}>{t.priority}</label>
               <select
                 value={formData.priority}
                 onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
@@ -1162,9 +1349,9 @@ const SprintPage = ({ data, setData }) => {
                   fontFamily: 'inherit'
                 }}
               >
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
+                <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
+                <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
+                <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
               </select>
             </div>
           </div>
@@ -1176,7 +1363,7 @@ const SprintPage = ({ data, setData }) => {
               fontSize: '12px',
               textTransform: 'uppercase',
               letterSpacing: '0.05em'
-            }}>Description</label>
+            }}>{t.description}</label>
             <textarea
               rows="4"
               value={formData.description}
@@ -1199,7 +1386,7 @@ const SprintPage = ({ data, setData }) => {
                 fontSize: '12px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em'
-              }}>Story Points</label>
+              }}>{t.storyPoints}</label>
               <input
                 type="number"
                 min="0"
@@ -1221,7 +1408,7 @@ const SprintPage = ({ data, setData }) => {
                 fontSize: '12px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em'
-              }}>Due Date</label>
+              }}>{t.dueDate}</label>
               <input
                 type="date"
                 value={formData.dueDate}
@@ -1244,10 +1431,10 @@ const SprintPage = ({ data, setData }) => {
               fontSize: '12px',
               textTransform: 'uppercase',
               letterSpacing: '0.05em'
-            }}>Assignee</label>
+            }}>{t.assignee}</label>
             <input
               type="text"
-              placeholder="John Doe"
+              placeholder={t.assigneePlaceholder}
               value={formData.assignee}
               onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
               style={{
@@ -1275,7 +1462,7 @@ const SprintPage = ({ data, setData }) => {
                 marginRight: '12px'
               }}
             >
-              Cancel
+              {t.cancel}
             </button>
             <button
               type="submit"
@@ -1291,7 +1478,7 @@ const SprintPage = ({ data, setData }) => {
                 fontSize: '1rem'
               }}
             >
-              Save Issue
+              {t.saveIssue}
             </button>
           </div>
         </form>
@@ -1301,6 +1488,7 @@ const SprintPage = ({ data, setData }) => {
 };
 
 const App = () => {
+  const [language, setLanguage] = useState(() => getInitialLanguage());
   const [data, setData] = useState(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -1330,13 +1518,32 @@ const App = () => {
     }
   }, [data]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    } catch (error) {
+      // Не останавливаем работу UI, если запись языка не удалась.
+      console.error('Не удалось сохранить язык интерфейса.', error);
+    }
+    document.documentElement.lang = language;
+  }, [language]);
+
+  const handleLanguageChange = (nextLanguage) => {
+    const resolvedLanguage = resolveLanguage(nextLanguage);
+    if (resolvedLanguage) {
+      setLanguage(resolvedLanguage);
+    }
+  };
+
+  const t = I18N[language] ?? I18N[DEFAULT_LANGUAGE];
+
   return (
     <Router basename="/">
       <div style={customStyles.root}>
-        <Header />
+        <Header language={language} onLanguageChange={handleLanguageChange} t={t} />
         <Routes>
-          <Route path="/" element={<IssuesPage data={data} setData={setData} />} />
-          <Route path="/sprint" element={<SprintPage data={data} setData={setData} />} />
+          <Route path="/" element={<IssuesPage data={data} setData={setData} t={t} />} />
+          <Route path="/sprint" element={<SprintPage data={data} setData={setData} t={t} />} />
         </Routes>
       </div>
     </Router>
