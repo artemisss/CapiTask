@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, useSearchParams } from 'react-router-dom';
 
 const STORAGE_KEY = 'capitask_data';
 const LANGUAGE_STORAGE_KEY = 'capitask_language';
+const ISSUES_VIEW_MODE_STORAGE_KEY = 'capitask_issues_view_mode';
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@'];
 const DEFAULT_LANGUAGE = 'en';
 
@@ -56,8 +57,10 @@ const I18N = {
     groupBy: 'Group by',
     groupByUsers: 'Users',
     groupByTypes: 'Types',
+    showRelations: 'Show relations',
     unassigned: 'Unassigned',
     noActiveTasks: 'No active tasks to display',
+    openIssue: 'Open issue',
     goal: 'Goal',
     filterSprint: 'Filter sprint...',
     exportCsv: 'Export CSV',
@@ -129,8 +132,10 @@ const I18N = {
     groupBy: 'Группировка',
     groupByUsers: 'По исполнителям',
     groupByTypes: 'По типам',
+    showRelations: 'Показать связи',
     unassigned: 'Не назначен',
     noActiveTasks: 'Нет активных задач для отображения',
+    openIssue: 'Открыть задачу',
     goal: 'Цель',
     filterSprint: 'Фильтр спринта...',
     exportCsv: 'Экспорт CSV',
@@ -196,6 +201,17 @@ const getInitialLanguage = () => {
   }
 
   return detectBrowserLanguage();
+};
+
+const getInitialIssuesViewMode = () => {
+  try {
+    const storedViewMode = localStorage.getItem(ISSUES_VIEW_MODE_STORAGE_KEY);
+    return storedViewMode === 'list' ? 'list' : 'board';
+  } catch (error) {
+    // Если localStorage недоступен, используем безопасный режим по умолчанию.
+    console.error('Не удалось прочитать сохранённый режим отображения задач.', error);
+    return 'board';
+  }
 };
 
 const formatCommentDate = (isoDate, language) => {
@@ -430,6 +446,12 @@ const Modal = ({ isOpen, onClose, title, children, width = '600px' }) => {
       opacity: isOpen ? 1 : 0,
       pointerEvents: isOpen ? 'all' : 'none',
       transition: 'opacity 0.2s'
+    }}
+    onMouseDown={(event) => {
+      // Закрываем окно по клику в свободную область затемнения.
+      if (event.target === event.currentTarget) {
+        onClose();
+      }
     }}>
       <div style={{
         background: 'white',
@@ -440,6 +462,10 @@ const Modal = ({ isOpen, onClose, title, children, width = '600px' }) => {
         padding: '40px',
         boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
         position: 'relative'
+      }}
+      onMouseDown={(event) => {
+        // Останавливаем всплытие, чтобы клик внутри окна не закрывал модалку.
+        event.stopPropagation();
       }}>
         <span onClick={onClose} style={{
           position: 'absolute',
@@ -758,7 +784,7 @@ const IssueCollaborationPanel = ({
         {issueComments.length === 0 ? (
           <div style={{ color: '#666', fontSize: '13px' }}>{t.noComments}</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '430px', overflowY: 'auto', paddingRight: '4px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', height: '320px', overflowY: 'auto', paddingRight: '4px' }}>
             {issueComments.map((comment, index) => (
               <div
                 key={comment.id}
@@ -781,7 +807,7 @@ const IssueCollaborationPanel = ({
 };
 
 const IssuesPage = ({ data, setData, t, language }) => {
-  const [viewMode, setViewMode] = useState('board');
+  const [viewMode, setViewMode] = useState(() => getInitialIssuesViewMode());
   const [searchInput, setSearchInput] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
@@ -793,6 +819,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
   const [relationSearch, setRelationSearch] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
   const listEndRef = useRef(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [formData, setFormData] = useState({
     title: '',
@@ -825,7 +852,22 @@ const IssuesPage = ({ data, setData, t, language }) => {
     return issues;
   };
 
-  const openModal = (issue = null) => {
+  const clearIssueQueryParam = () => {
+    if (!searchParams.has('issue')) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('issue');
+    setSearchParams(nextParams, { replace: true });
+  };
+
+  const openModal = (issue = null, options = {}) => {
+    const { keepIssueQuery = false } = options;
+    if (!keepIssueQuery) {
+      clearIssueQueryParam();
+    }
+
     setRelationSearch('');
     setCommentDraft('');
 
@@ -860,6 +902,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
     setEditingIssue(null);
     setRelationSearch('');
     setCommentDraft('');
+    clearIssueQueryParam();
   };
 
   const handleFormSubmit = (e) => {
@@ -942,6 +985,34 @@ const IssuesPage = ({ data, setData, t, language }) => {
 
     return () => observer.disconnect();
   }, [viewMode, filteredIssues.length, searchInput, filterType, filterPriority]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ISSUES_VIEW_MODE_STORAGE_KEY, viewMode);
+    } catch (error) {
+      // Не прерываем работу страницы, если запись в localStorage недоступна.
+      console.error('Не удалось сохранить режим отображения задач.', error);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
+    const issueIdFromQuery = searchParams.get('issue');
+    if (!issueIdFromQuery) {
+      return;
+    }
+
+    const issueFromQuery = data.issues.find((candidate) => candidate.id === issueIdFromQuery);
+    if (!issueFromQuery) {
+      return;
+    }
+
+    if (modalOpen && editingIssue?.id === issueFromQuery.id) {
+      return;
+    }
+
+    // Открываем задачу из URL, когда переходим из диаграммы Ганта.
+    openModal(issueFromQuery, { keepIssueQuery: true });
+  }, [searchParams, data.issues, modalOpen, editingIssue?.id]);
 
   return (
     <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -1089,7 +1160,10 @@ const IssuesPage = ({ data, setData, t, language }) => {
                 display: 'flex',
                 alignItems: 'baseline'
               }}>
-                {getTranslatedLabel(t.statusLabels, status)} <span style={{ fontSize: '0.6em', verticalAlign: 'super', marginLeft: '2px', fontWeight: 400 }}>{count}</span>
+                {getTranslatedLabel(t.statusLabels, status)}
+                <sup style={{ fontSize: '0.58em', marginLeft: '4px', fontWeight: 400, lineHeight: 1 }}>
+                  {count}
+                </sup>
               </div>
               <div style={{ flex: 1, overflowY: 'auto', minHeight: '100px' }}>
                 {issues.map(issue => (
@@ -1904,8 +1978,13 @@ const SprintPage = ({ data, setData, t, language }) => {
 
 const GanttPage = ({ data, t, language }) => {
   const [groupBy, setGroupBy] = useState('assignee');
+  const [showRelations, setShowRelations] = useState(false);
+  const [openedIssueId, setOpenedIssueId] = useState(null);
 
   const activeIssues = data.issues.filter((issue) => issue.status !== 'Done');
+  const openedIssue = openedIssueId
+    ? data.issues.find((issue) => issue.id === openedIssueId) ?? null
+    : null;
   const today = startOfLocalDay(new Date());
 
   const issuesWithRange = activeIssues.map((issue) => {
@@ -1973,6 +2052,30 @@ const GanttPage = ({ data, t, language }) => {
 
   const rowLabelWidth = 300;
   const dayCellWidth = 42;
+  const timelineHeaderHeight = 44;
+  const groupHeaderHeight = 42;
+  const issueRowHeight = 52;
+  const issueBarTopOffset = 10;
+  const issueBarHeight = 30;
+  const issueBarMinWidth = dayCellWidth - 4;
+  const issueBarXOffset = 2;
+  const chartContentWidth = rowLabelWidth + totalDays * dayCellWidth;
+
+  const resolveIssueTimeline = (startDate, endDate) => {
+    const rawStartIndex = dayIndexByKey.get(toDateKey(startDate));
+    const rawEndIndex = dayIndexByKey.get(toDateKey(endDate));
+    const startIndex = Number.isInteger(rawStartIndex) ? rawStartIndex : 0;
+    const endIndex = Number.isInteger(rawEndIndex) ? rawEndIndex : totalDays - 1;
+    const normalizedStartIndex = Math.max(0, Math.min(totalDays - 1, Math.min(startIndex, endIndex)));
+    const normalizedEndIndex = Math.max(normalizedStartIndex, Math.min(totalDays - 1, Math.max(startIndex, endIndex)));
+    const barWidth = Math.max(issueBarMinWidth, (normalizedEndIndex - normalizedStartIndex + 1) * dayCellWidth - 4);
+
+    return {
+      startIndex: normalizedStartIndex,
+      endIndex: normalizedEndIndex,
+      barWidth
+    };
+  };
 
   const getBarColor = (priority) => {
     if (priority === 'High') {
@@ -1984,13 +2087,79 @@ const GanttPage = ({ data, t, language }) => {
     return '#84cc9b';
   };
 
+  const issueBarPositions = new Map();
+  let currentChartY = timelineHeaderHeight;
+
+  groups.forEach(({ groupItems }) => {
+    currentChartY += groupHeaderHeight;
+    groupItems.forEach(({ issue, startDate, endDate }) => {
+      const { startIndex, barWidth } = resolveIssueTimeline(startDate, endDate);
+      const barStartX = rowLabelWidth + startIndex * dayCellWidth + issueBarXOffset;
+
+      issueBarPositions.set(issue.id, {
+        startX: barStartX,
+        endX: barStartX + barWidth,
+        centerY: currentChartY + issueBarTopOffset + issueBarHeight / 2
+      });
+
+      currentChartY += issueRowHeight;
+    });
+  });
+
+  const relationPaths = [];
+  if (showRelations) {
+    const renderedRelations = new Set();
+
+    groups.forEach(({ groupItems }) => {
+      groupItems.forEach(({ issue }) => {
+        const sourceBar = issueBarPositions.get(issue.id);
+        if (!sourceBar) {
+          return;
+        }
+
+        const relatedIssueIds = Array.isArray(issue.relatesTo) ? issue.relatesTo : [];
+        relatedIssueIds.forEach((targetIssueId) => {
+          if (!targetIssueId || targetIssueId === issue.id) {
+            return;
+          }
+
+          const targetBar = issueBarPositions.get(targetIssueId);
+          if (!targetBar) {
+            return;
+          }
+
+          const relationKey = [issue.id, targetIssueId].sort().join('__');
+          if (renderedRelations.has(relationKey)) {
+            return;
+          }
+
+          renderedRelations.add(relationKey);
+
+          // Рисуем "уступ": вправо, затем по вертикали и в целевую задачу.
+          const hasHorizontalGap = targetBar.startX - sourceBar.endX >= 40;
+          const turnX = hasHorizontalGap
+            ? sourceBar.endX + 18
+            : Math.max(sourceBar.endX, targetBar.startX) + 28;
+
+          relationPaths.push(
+            `M ${sourceBar.endX} ${sourceBar.centerY} L ${turnX} ${sourceBar.centerY} L ${turnX} ${targetBar.centerY} L ${targetBar.startX} ${targetBar.centerY}`
+          );
+        });
+      });
+    });
+  }
+
+  const closeIssueModal = () => {
+    setOpenedIssueId(null);
+  };
+
   return (
     <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
       <h1 style={{ fontSize: '3rem', marginBottom: '24px', lineHeight: 1, fontWeight: 500, letterSpacing: '-0.02em' }}>
         {t.ganttTitle}
       </h1>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '14px', color: '#555' }}>{t.groupBy}:</span>
         <button
           type="button"
@@ -2018,6 +2187,32 @@ const GanttPage = ({ data, t, language }) => {
         >
           {t.groupByTypes}
         </button>
+        <label style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '8px',
+          border: '1px solid var(--border-color)',
+          borderRadius: '999px',
+          padding: '8px 14px',
+          fontSize: '13px',
+          cursor: 'pointer',
+          userSelect: 'none',
+          background: showRelations ? '#F7F7F7' : '#fff'
+        }}>
+          <input
+            type="checkbox"
+            checked={showRelations}
+            onChange={(event) => setShowRelations(event.target.checked)}
+            style={{
+              width: '16px',
+              height: '16px',
+              margin: 0,
+              cursor: 'pointer',
+              accentColor: 'var(--text-color)'
+            }}
+          />
+          {t.showRelations}
+        </label>
       </div>
 
       <div style={{
@@ -2025,18 +2220,62 @@ const GanttPage = ({ data, t, language }) => {
         borderRadius: '16px',
         overflowX: 'auto'
       }}>
-        <div style={{ minWidth: `${rowLabelWidth + totalDays * dayCellWidth}px` }}>
+        <div style={{ minWidth: `${chartContentWidth}px`, position: 'relative' }}>
+          {showRelations && relationPaths.length > 0 && (
+            <svg
+              aria-hidden="true"
+              width={chartContentWidth}
+              height={currentChartY}
+              viewBox={`0 0 ${chartContentWidth} ${currentChartY}`}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                pointerEvents: 'none',
+                zIndex: 1
+              }}
+            >
+              <defs>
+                <marker
+                  id="gantt-relation-arrow"
+                  markerWidth="7"
+                  markerHeight="7"
+                  refX="6"
+                  refY="3.5"
+                  orient="auto"
+                >
+                  <path d="M 0 0 L 7 3.5 L 0 7 z" fill="#242424" />
+                </marker>
+              </defs>
+              {relationPaths.map((pathData, index) => (
+                <path
+                  key={`gantt-link-${index + 1}`}
+                  d={pathData}
+                  fill="none"
+                  stroke="#242424"
+                  strokeWidth="1.4"
+                  markerEnd="url(#gantt-relation-arrow)"
+                  opacity="0.9"
+                />
+              ))}
+            </svg>
+          )}
+
           <div style={{
             display: 'grid',
             gridTemplateColumns: `${rowLabelWidth}px repeat(${totalDays}, ${dayCellWidth}px)`,
             borderBottom: '1px solid var(--border-color)',
-            background: '#FAFAFA'
+            background: '#FAFAFA',
+            height: `${timelineHeaderHeight}px`,
+            alignItems: 'center'
           }}>
             <div style={{
-              padding: '12px 16px',
+              padding: '0 16px',
               fontSize: '12px',
               textTransform: 'uppercase',
-              fontWeight: 600
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center'
             }}>
               {t.summary}
             </div>
@@ -2044,10 +2283,13 @@ const GanttPage = ({ data, t, language }) => {
               <div
                 key={toDateKey(date)}
                 style={{
-                  padding: '10px 4px',
+                  padding: '0 4px',
                   textAlign: 'center',
                   fontSize: '11px',
-                  borderLeft: '1px solid var(--border-color)'
+                  borderLeft: '1px solid var(--border-color)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
                 }}
               >
                 {date.toLocaleDateString(locale, { day: '2-digit', month: 'short' })}
@@ -2061,18 +2303,24 @@ const GanttPage = ({ data, t, language }) => {
                 display: 'grid',
                 gridTemplateColumns: `${rowLabelWidth}px repeat(${totalDays}, ${dayCellWidth}px)`,
                 borderBottom: '1px solid var(--border-color)',
-                background: '#FFFBE6'
+                background: '#FFFBE6',
+                height: `${groupHeaderHeight}px`,
+                alignItems: 'center'
               }}>
-                <div style={{ padding: '10px 16px', fontSize: '13px', fontWeight: 600 }}>
+                <div style={{
+                  padding: '0 16px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
                   {groupLabel}
                 </div>
                 <div style={{ gridColumn: `2 / span ${totalDays}` }} />
               </div>
 
               {groupItems.map(({ issue, startDate, endDate }) => {
-                const startIndex = dayIndexByKey.get(toDateKey(startDate)) ?? 0;
-                const endIndex = dayIndexByKey.get(toDateKey(endDate)) ?? totalDays - 1;
-                const barWidth = Math.max(dayCellWidth - 4, (endIndex - startIndex + 1) * dayCellWidth - 4);
+                const { startIndex, barWidth } = resolveIssueTimeline(startDate, endDate);
 
                 return (
                   <div
@@ -2080,7 +2328,8 @@ const GanttPage = ({ data, t, language }) => {
                     style={{
                       display: 'grid',
                       gridTemplateColumns: `${rowLabelWidth}px repeat(${totalDays}, ${dayCellWidth}px)`,
-                      borderBottom: '1px solid var(--border-color)'
+                      borderBottom: '1px solid var(--border-color)',
+                      minHeight: `${issueRowHeight}px`
                     }}
                   >
                     <div style={{ padding: '10px 16px', minWidth: 0 }}>
@@ -2096,7 +2345,7 @@ const GanttPage = ({ data, t, language }) => {
                       </div>
                     </div>
 
-                    <div style={{ gridColumn: `2 / span ${totalDays}`, position: 'relative', height: '52px' }}>
+                    <div style={{ gridColumn: `2 / span ${totalDays}`, position: 'relative', height: `${issueRowHeight}px` }}>
                       <div style={{
                         position: 'absolute',
                         inset: 0,
@@ -2113,22 +2362,54 @@ const GanttPage = ({ data, t, language }) => {
 
                       <div style={{
                         position: 'absolute',
-                        left: `${startIndex * dayCellWidth + 2}px`,
-                        top: '10px',
+                        left: `${startIndex * dayCellWidth + issueBarXOffset}px`,
+                        top: `${issueBarTopOffset}px`,
                         width: `${barWidth}px`,
-                        height: '30px',
+                        height: `${issueBarHeight}px`,
                         borderRadius: '8px',
                         background: getBarColor(issue.priority),
                         color: '#111',
                         display: 'flex',
                         alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '8px',
                         padding: '0 8px',
                         fontSize: '11px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
+                        zIndex: 2
                       }}>
-                        {issue.title}
+                        <span style={{
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {issue.title}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setOpenedIssueId(issue.id);
+                          }}
+                          title={t.openIssue}
+                          aria-label={t.openIssue}
+                          style={{
+                            width: '18px',
+                            height: '18px',
+                            borderRadius: '50%',
+                            border: '1px solid rgba(0,0,0,0.35)',
+                            background: 'rgba(255,255,255,0.85)',
+                            color: '#111',
+                            fontSize: '11px',
+                            lineHeight: 1,
+                            cursor: 'pointer',
+                            padding: 0,
+                            flexShrink: 0
+                          }}
+                        >
+                          i
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -2138,6 +2419,78 @@ const GanttPage = ({ data, t, language }) => {
           ))}
         </div>
       </div>
+
+      <Modal
+        isOpen={Boolean(openedIssue)}
+        onClose={closeIssueModal}
+        title={openedIssue ? `${t.openIssue}: ${openedIssue.id}` : t.openIssue}
+        width="760px"
+      >
+        {openedIssue && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: '10px'
+            }}>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>{t.status}</div>
+                <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                  {getTranslatedLabel(t.statusLabels, openedIssue.status)}
+                </div>
+              </div>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>{t.type}</div>
+                <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                  {getTranslatedLabel(t.typeLabels, openedIssue.type)}
+                </div>
+              </div>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>{t.priority}</div>
+                <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                  {getTranslatedLabel(t.priorityLabels, openedIssue.priority)}
+                </div>
+              </div>
+              <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '10px' }}>
+                <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>{t.dueDate}</div>
+                <div style={{ fontSize: '13px', fontWeight: 600 }}>
+                  {openedIssue.dueDate || '-'}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px' }}>{t.summary}</div>
+              <div style={{ fontSize: '15px', fontWeight: 600 }}>{openedIssue.title}</div>
+            </div>
+
+            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px' }}>{t.description}</div>
+              <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '13px' }}>
+                {openedIssue.description || '-'}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={closeIssueModal}
+                style={{
+                  border: '1px solid var(--border-color)',
+                  padding: '10px 20px',
+                  borderRadius: 'var(--radius-lg)',
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  background: 'none',
+                  fontSize: '1rem'
+                }}
+              >
+                {t.cancel}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </main>
   );
 };
