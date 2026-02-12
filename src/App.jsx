@@ -10,6 +10,7 @@ const I18N = {
   en: {
     issuesNav: 'Issues',
     activeSprintNav: 'Active Sprint',
+    ganttNav: 'Gantt Chart',
     language: 'Language',
     languageNames: {
       en: 'English',
@@ -51,6 +52,12 @@ const I18N = {
     backlogCompleted: 'Great, you reached the end of backlog',
     capybaraAlt: 'Capybara at the end of tasks list',
     sprintBoard: 'Sprint Board',
+    ganttTitle: 'Gantt Chart',
+    groupBy: 'Group by',
+    groupByUsers: 'Users',
+    groupByTypes: 'Types',
+    unassigned: 'Unassigned',
+    noActiveTasks: 'No active tasks to display',
     goal: 'Goal',
     filterSprint: 'Filter sprint...',
     exportCsv: 'Export CSV',
@@ -76,6 +83,7 @@ const I18N = {
   ru: {
     issuesNav: 'Задачи',
     activeSprintNav: 'Активный спринт',
+    ganttNav: 'Диаграмма Ганта',
     language: 'Язык',
     languageNames: {
       en: 'English',
@@ -117,6 +125,12 @@ const I18N = {
     backlogCompleted: 'Поздравляем, весь backlog просмотрен',
     capybaraAlt: 'Капибара в конце списка задач',
     sprintBoard: 'Доска спринта',
+    ganttTitle: 'Диаграмма Ганта',
+    groupBy: 'Группировка',
+    groupByUsers: 'По исполнителям',
+    groupByTypes: 'По типам',
+    unassigned: 'Не назначен',
+    noActiveTasks: 'Нет активных задач для отображения',
     goal: 'Цель',
     filterSprint: 'Фильтр спринта...',
     exportCsv: 'Экспорт CSV',
@@ -199,6 +213,45 @@ const formatCommentDate = (isoDate, language) => {
     // Если дата повреждена, показываем исходное значение как безопасный fallback.
     return String(isoDate);
   }
+};
+
+const startOfLocalDay = (dateValue) => {
+  const date = new Date(dateValue);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0, 0);
+};
+
+const parseLocalDate = (dateString) => {
+  if (typeof dateString !== 'string' || !dateString) {
+    return null;
+  }
+
+  const parts = dateString.split('-').map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) {
+    return null;
+  }
+
+  const [year, month, day] = parts;
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+};
+
+const addDays = (dateValue, days) => {
+  const date = startOfLocalDay(dateValue);
+  date.setDate(date.getDate() + days);
+  return date;
+};
+
+const dateDiffInDays = (fromDate, toDate) => {
+  const start = startOfLocalDay(fromDate).getTime();
+  const end = startOfLocalDay(toDate).getTime();
+  return Math.round((end - start) / (24 * 60 * 60 * 1000));
+};
+
+const toDateKey = (dateValue) => {
+  const date = startOfLocalDay(dateValue);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const SELECT_ARROW_ICON = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22 fill=%22none%22%3E%3Cpath d=%22M1 1.5L6 6.5L11 1.5%22 stroke=%22%23000000%22 stroke-width=%221.6%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3C/svg%3E';
@@ -321,6 +374,13 @@ const Header = ({ language, onLanguageChange, t }) => {
             fontWeight: 400,
             position: 'relative'
           }}>{t.activeSprintNav}</Link>
+          <Link to="/gantt" style={{
+            textDecoration: 'none',
+            color: 'var(--text-color)',
+            marginLeft: '32px',
+            fontWeight: 400,
+            position: 'relative'
+          }}>{t.ganttNav}</Link>
         </nav>
         <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px' }}>
           <span>{t.language}</span>
@@ -1842,6 +1902,246 @@ const SprintPage = ({ data, setData, t, language }) => {
   );
 };
 
+const GanttPage = ({ data, t, language }) => {
+  const [groupBy, setGroupBy] = useState('assignee');
+
+  const activeIssues = data.issues.filter((issue) => issue.status !== 'Done');
+  const today = startOfLocalDay(new Date());
+
+  const issuesWithRange = activeIssues.map((issue) => {
+    const dueDate = parseLocalDate(issue.dueDate) ?? addDays(today, 5);
+    const storyPoints = Number.parseInt(issue.storyPoints, 10);
+    const durationDays = Math.max(
+      1,
+      Math.min(14, Number.isFinite(storyPoints) && storyPoints > 0 ? storyPoints : 3)
+    );
+    const startDate = addDays(dueDate, -(durationDays - 1));
+
+    return {
+      issue,
+      startDate,
+      endDate: dueDate
+    };
+  });
+
+  if (issuesWithRange.length === 0) {
+    return (
+      <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
+        <h1 style={{ fontSize: '3rem', marginBottom: '24px', lineHeight: 1, fontWeight: 500, letterSpacing: '-0.02em' }}>
+          {t.ganttTitle}
+        </h1>
+        <div style={{ color: '#666' }}>{t.noActiveTasks}</div>
+      </main>
+    );
+  }
+
+  const minStart = issuesWithRange.reduce(
+    (minDate, currentIssue) => (currentIssue.startDate < minDate ? currentIssue.startDate : minDate),
+    issuesWithRange[0].startDate
+  );
+  const maxEnd = issuesWithRange.reduce(
+    (maxDate, currentIssue) => (currentIssue.endDate > maxDate ? currentIssue.endDate : maxDate),
+    issuesWithRange[0].endDate
+  );
+
+  const timelineStart = addDays(minStart, -1);
+  const timelineEnd = addDays(maxEnd, 1);
+  const totalDays = dateDiffInDays(timelineStart, timelineEnd) + 1;
+  const timelineDays = Array.from({ length: totalDays }, (_, index) => addDays(timelineStart, index));
+  const dayIndexByKey = new Map(timelineDays.map((date, index) => [toDateKey(date), index]));
+
+  const groupedIssues = issuesWithRange.reduce((groupsMap, issueData) => {
+    const groupLabel = groupBy === 'assignee'
+      ? (issueData.issue.assignee?.trim() || t.unassigned)
+      : getTranslatedLabel(t.typeLabels, issueData.issue.type);
+
+    if (!groupsMap.has(groupLabel)) {
+      groupsMap.set(groupLabel, []);
+    }
+
+    groupsMap.get(groupLabel).push(issueData);
+    return groupsMap;
+  }, new Map());
+
+  const locale = language === 'ru' ? 'ru-RU' : 'en-US';
+  const groups = Array.from(groupedIssues.entries())
+    .map(([groupLabel, groupItems]) => ({
+      groupLabel,
+      groupItems: groupItems.sort((leftItem, rightItem) => leftItem.startDate - rightItem.startDate)
+    }))
+    .sort((leftGroup, rightGroup) => leftGroup.groupLabel.localeCompare(rightGroup.groupLabel, locale));
+
+  const rowLabelWidth = 300;
+  const dayCellWidth = 42;
+
+  const getBarColor = (priority) => {
+    if (priority === 'High') {
+      return '#f4a261';
+    }
+    if (priority === 'Medium') {
+      return '#e9c46a';
+    }
+    return '#84cc9b';
+  };
+
+  return (
+    <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
+      <h1 style={{ fontSize: '3rem', marginBottom: '24px', lineHeight: 1, fontWeight: 500, letterSpacing: '-0.02em' }}>
+        {t.ganttTitle}
+      </h1>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+        <span style={{ fontSize: '14px', color: '#555' }}>{t.groupBy}:</span>
+        <button
+          type="button"
+          onClick={() => setGroupBy('assignee')}
+          style={{
+            border: '1px solid var(--border-color)',
+            borderRadius: '999px',
+            padding: '8px 14px',
+            background: groupBy === 'assignee' ? 'var(--accent-color)' : '#fff',
+            fontSize: '13px'
+          }}
+        >
+          {t.groupByUsers}
+        </button>
+        <button
+          type="button"
+          onClick={() => setGroupBy('type')}
+          style={{
+            border: '1px solid var(--border-color)',
+            borderRadius: '999px',
+            padding: '8px 14px',
+            background: groupBy === 'type' ? 'var(--accent-color)' : '#fff',
+            fontSize: '13px'
+          }}
+        >
+          {t.groupByTypes}
+        </button>
+      </div>
+
+      <div style={{
+        border: '1px solid var(--border-color)',
+        borderRadius: '16px',
+        overflowX: 'auto'
+      }}>
+        <div style={{ minWidth: `${rowLabelWidth + totalDays * dayCellWidth}px` }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: `${rowLabelWidth}px repeat(${totalDays}, ${dayCellWidth}px)`,
+            borderBottom: '1px solid var(--border-color)',
+            background: '#FAFAFA'
+          }}>
+            <div style={{
+              padding: '12px 16px',
+              fontSize: '12px',
+              textTransform: 'uppercase',
+              fontWeight: 600
+            }}>
+              {t.summary}
+            </div>
+            {timelineDays.map((date) => (
+              <div
+                key={toDateKey(date)}
+                style={{
+                  padding: '10px 4px',
+                  textAlign: 'center',
+                  fontSize: '11px',
+                  borderLeft: '1px solid var(--border-color)'
+                }}
+              >
+                {date.toLocaleDateString(locale, { day: '2-digit', month: 'short' })}
+              </div>
+            ))}
+          </div>
+
+          {groups.map(({ groupLabel, groupItems }) => (
+            <div key={groupLabel}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: `${rowLabelWidth}px repeat(${totalDays}, ${dayCellWidth}px)`,
+                borderBottom: '1px solid var(--border-color)',
+                background: '#FFFBE6'
+              }}>
+                <div style={{ padding: '10px 16px', fontSize: '13px', fontWeight: 600 }}>
+                  {groupLabel}
+                </div>
+                <div style={{ gridColumn: `2 / span ${totalDays}` }} />
+              </div>
+
+              {groupItems.map(({ issue, startDate, endDate }) => {
+                const startIndex = dayIndexByKey.get(toDateKey(startDate)) ?? 0;
+                const endIndex = dayIndexByKey.get(toDateKey(endDate)) ?? totalDays - 1;
+                const barWidth = Math.max(dayCellWidth - 4, (endIndex - startIndex + 1) * dayCellWidth - 4);
+
+                return (
+                  <div
+                    key={`${groupLabel}-${issue.id}`}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: `${rowLabelWidth}px repeat(${totalDays}, ${dayCellWidth}px)`,
+                      borderBottom: '1px solid var(--border-color)'
+                    }}
+                  >
+                    <div style={{ padding: '10px 16px', minWidth: 0 }}>
+                      <div style={{ fontSize: '12px', fontWeight: 600 }}>{issue.id}</div>
+                      <div style={{
+                        fontSize: '12px',
+                        color: '#555',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {issue.title}
+                      </div>
+                    </div>
+
+                    <div style={{ gridColumn: `2 / span ${totalDays}`, position: 'relative', height: '52px' }}>
+                      <div style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'grid',
+                        gridTemplateColumns: `repeat(${totalDays}, ${dayCellWidth}px)`
+                      }}>
+                        {timelineDays.map((date, index) => (
+                          <div
+                            key={`${issue.id}-${toDateKey(date)}`}
+                            style={{ borderLeft: index === 0 ? 'none' : '1px solid #f1f1f1' }}
+                          />
+                        ))}
+                      </div>
+
+                      <div style={{
+                        position: 'absolute',
+                        left: `${startIndex * dayCellWidth + 2}px`,
+                        top: '10px',
+                        width: `${barWidth}px`,
+                        height: '30px',
+                        borderRadius: '8px',
+                        background: getBarColor(issue.priority),
+                        color: '#111',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '0 8px',
+                        fontSize: '11px',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {issue.title}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+};
+
 const App = () => {
   const [language, setLanguage] = useState(() => getInitialLanguage());
   const [data, setData] = useState(() => {
@@ -1906,6 +2206,7 @@ const App = () => {
         <Routes>
           <Route path="/" element={<IssuesPage data={data} setData={setData} t={t} language={language} />} />
           <Route path="/sprint" element={<SprintPage data={data} setData={setData} t={t} language={language} />} />
+          <Route path="/gantt" element={<GanttPage data={data} t={t} language={language} />} />
         </Routes>
       </div>
     </Router>
