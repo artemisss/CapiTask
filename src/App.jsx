@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 
 const STORAGE_KEY = 'capitask_data';
 const LANGUAGE_STORAGE_KEY = 'capitask_language';
-const LIST_BOTTOM_THRESHOLD_PX = 8;
 const CSV_FORMULA_PREFIXES = ['=', '+', '-', '@'];
 const DEFAULT_LANGUAGE = 'en';
 
@@ -456,6 +455,7 @@ const IssuesPage = ({ data, setData, t }) => {
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
   const [showCapybaraEasterEgg, setShowCapybaraEasterEgg] = useState(false);
+  const listEndRef = useRef(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -572,17 +572,29 @@ const IssuesPage = ({ data, setData, t }) => {
   const progressIssues = filteredIssues.filter(i => i.status === 'In Progress');
   const doneIssues = filteredIssues.filter(i => i.status === 'Done');
 
-  const handleListScroll = (event) => {
-    const { scrollTop, clientHeight, scrollHeight } = event.currentTarget;
-    // Пасхалка включается, когда пользователь реально дошёл до низа списка задач.
-    const isBottomReached = scrollTop + clientHeight >= scrollHeight - LIST_BOTTOM_THRESHOLD_PX;
-    setShowCapybaraEasterEgg(isBottomReached);
-  };
-
   useEffect(() => {
-    // При смене режима/фильтров прячем пасхалку, чтобы её нужно было "найти" заново.
-    setShowCapybaraEasterEgg(false);
-  }, [viewMode, searchInput, filterType, filterPriority, data.issues.length]);
+    if (viewMode !== 'list' || filteredIssues.length === 0) {
+      setShowCapybaraEasterEgg(false);
+      return undefined;
+    }
+
+    const target = listEndRef.current;
+    if (!target) {
+      return undefined;
+    }
+
+    // Следим за концом списка в viewport браузера, чтобы скролл оставался глобальным.
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setShowCapybaraEasterEgg(entry.isIntersecting);
+      },
+      { threshold: 0 }
+    );
+
+    observer.observe(target);
+
+    return () => observer.disconnect();
+  }, [viewMode, filteredIssues.length, searchInput, filterType, filterPriority]);
 
   return (
     <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -749,10 +761,7 @@ const IssuesPage = ({ data, setData, t }) => {
             <div>{t.due}</div>
           </div>
           <div
-            onScroll={handleListScroll}
             style={{
-              maxHeight: 'calc(100vh - 320px)',
-              overflowY: 'auto',
               borderBottom: '1px solid var(--border-color)'
             }}
           >
@@ -807,6 +816,7 @@ const IssuesPage = ({ data, setData, t }) => {
                 </div>
               );
             })}
+            <div ref={listEndRef} style={{ height: '2px' }} aria-hidden="true" />
             {showCapybaraEasterEgg && filteredIssues.length > 0 && (
               <div style={{
                 padding: '24px',
