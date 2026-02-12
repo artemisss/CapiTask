@@ -165,6 +165,29 @@ const getInitialLanguage = () => {
   return detectBrowserLanguage();
 };
 
+const SELECT_ARROW_ICON = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%228%22 viewBox=%220 0 12 8%22 fill=%22none%22%3E%3Cpath d=%22M1 1.5L6 6.5L11 1.5%22 stroke=%22%23000000%22 stroke-width=%221.6%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/%3E%3C/svg%3E';
+
+const getSelectStyle = (overrides = {}) => ({
+  padding: '10px 40px 10px 16px',
+  border: '1px solid var(--border-color)',
+  borderRadius: 'var(--radius-lg)',
+  fontSize: '14px',
+  outline: 'none',
+  backgroundColor: 'white',
+  color: 'var(--text-color)',
+  fontFamily: 'inherit',
+  cursor: 'pointer',
+  appearance: 'none',
+  WebkitAppearance: 'none',
+  MozAppearance: 'none',
+  backgroundImage: `url("${SELECT_ARROW_ICON}")`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 14px center',
+  backgroundSize: '12px 8px',
+  transition: 'border-color 0.2s, box-shadow 0.2s',
+  ...overrides
+});
+
 const customStyles = {
   root: {
     '--bg-color': '#FFFFFF',
@@ -267,13 +290,12 @@ const Header = ({ language, onLanguageChange, t }) => {
           <select
             value={language}
             onChange={(event) => onLanguageChange(event.target.value)}
-            style={{
-              padding: '6px 10px',
-              border: '1px solid var(--border-color)',
+            style={getSelectStyle({
+              padding: '8px 36px 8px 12px',
               borderRadius: '10px',
-              background: '#fff',
-              fontFamily: 'inherit'
-            }}
+              minWidth: '130px',
+              backgroundPosition: 'right 10px center'
+            })}
           >
             <option value="en">{t.languageNames.en}</option>
             <option value="ru">{t.languageNames.ru}</option>
@@ -595,15 +617,7 @@ const IssuesPage = ({ data, setData, t }) => {
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-            style={{
-              padding: '10px 16px',
-              border: '1px solid var(--border-color)',
-              borderRadius: 'var(--radius-lg)',
-              fontSize: '14px',
-              outline: 'none',
-              background: 'white',
-              minWidth: '150px'
-            }}
+            style={getSelectStyle({ minWidth: '150px' })}
           >
             <option value="">{t.allTypes}</option>
             <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
@@ -613,15 +627,7 @@ const IssuesPage = ({ data, setData, t }) => {
           <select
             value={filterPriority}
             onChange={(e) => setFilterPriority(e.target.value)}
-            style={{
-              padding: '10px 16px',
-              border: '1px solid var(--border-color)',
-              borderRadius: 'var(--radius-lg)',
-              fontSize: '14px',
-              outline: 'none',
-              background: 'white',
-              minWidth: '150px'
-            }}
+            style={getSelectStyle({ minWidth: '150px' })}
           >
             <option value="">{t.allPriorities}</option>
             <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
@@ -859,13 +865,11 @@ const IssuesPage = ({ data, setData, t }) => {
               <select
                 value={formData.type}
                 onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                style={{
+                style={getSelectStyle({
                   width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontFamily: 'inherit'
-                }}
+                  padding: '12px 40px 12px 12px',
+                  borderRadius: '8px'
+                })}
               >
                 <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
                 <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
@@ -883,13 +887,11 @@ const IssuesPage = ({ data, setData, t }) => {
               <select
                 value={formData.priority}
                 onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                style={{
+                style={getSelectStyle({
                   width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontFamily: 'inherit'
-                }}
+                  padding: '12px 40px 12px 12px',
+                  borderRadius: '8px'
+                })}
               >
                 <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
                 <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
@@ -1245,13 +1247,13 @@ const SprintPage = ({ data, setData, t }) => {
                 <select
                   value={issue.status}
                   onChange={(e) => updateStatus(issue.id, e.target.value)}
-                  style={{
-                    minWidth: '100px',
-                    padding: '4px',
-                    border: '1px solid var(--border-color)',
+                  style={getSelectStyle({
+                    minWidth: '150px',
+                    padding: '8px 34px 8px 10px',
                     borderRadius: '8px',
-                    fontFamily: 'inherit'
-                  }}
+                    fontSize: '13px',
+                    backgroundPosition: 'right 10px center'
+                  })}
                 >
                   <option value="To Do">{getTranslatedLabel(t.statusLabels, 'To Do')}</option>
                   <option value="In Progress">{getTranslatedLabel(t.statusLabels, 'In Progress')}</option>
@@ -1317,13 +1319,11 @@ const SprintPage = ({ data, setData, t }) => {
               <select
                 value={formData.type}
                 onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                style={{
+                style={getSelectStyle({
                   width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontFamily: 'inherit'
-                }}
+                  padding: '12px 40px 12px 12px',
+                  borderRadius: '8px'
+                })}
               >
                 <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
                 <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
@@ -1341,13 +1341,11 @@ const SprintPage = ({ data, setData, t }) => {
               <select
                 value={formData.priority}
                 onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                style={{
+                style={getSelectStyle({
                   width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  fontFamily: 'inherit'
-                }}
+                  padding: '12px 40px 12px 12px',
+                  borderRadius: '8px'
+                })}
               >
                 <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
                 <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
