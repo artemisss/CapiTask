@@ -19,6 +19,7 @@ const I18N = {
     searchIssues: 'Search issues...',
     allTypes: 'All Types',
     allPriorities: 'All Priorities',
+    resetFilters: 'Reset filters',
     switchToList: 'Switch to List',
     switchToBoard: 'Switch to Board',
     createIssue: 'Create Issue',
@@ -75,6 +76,7 @@ const I18N = {
     searchIssues: 'Поиск задач...',
     allTypes: 'Все типы',
     allPriorities: 'Все приоритеты',
+    resetFilters: 'Сбросить фильтры',
     switchToList: 'Переключить на список',
     switchToBoard: 'Переключить на доску',
     createIssue: 'Создать задачу',
@@ -571,6 +573,7 @@ const IssuesPage = ({ data, setData, t }) => {
   const todoIssues = filteredIssues.filter(i => i.status === 'To Do');
   const progressIssues = filteredIssues.filter(i => i.status === 'In Progress');
   const doneIssues = filteredIssues.filter(i => i.status === 'Done');
+  const hasActiveFilters = Boolean(filterType || filterPriority);
 
   useEffect(() => {
     if (viewMode !== 'list' || filteredIssues.length === 0) {
@@ -646,6 +649,26 @@ const IssuesPage = ({ data, setData, t }) => {
             <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
             <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
           </select>
+          <button
+            type="button"
+            onClick={() => {
+              setFilterType('');
+              setFilterPriority('');
+            }}
+            disabled={!hasActiveFilters}
+            style={{
+              border: '1px solid var(--border-color)',
+              padding: '10px 16px',
+              borderRadius: 'var(--radius-lg)',
+              fontFamily: 'inherit',
+              background: 'none',
+              fontSize: '14px',
+              color: hasActiveFilters ? 'var(--text-color)' : '#A0A0A0',
+              cursor: hasActiveFilters ? 'pointer' : 'not-allowed'
+            }}
+          >
+            {t.resetFilters}
+          </button>
         </div>
         <div>
           <button
