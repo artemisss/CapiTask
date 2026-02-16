@@ -88,6 +88,10 @@ const I18N = {
     exportCsv: 'Export CSV',
     actions: 'Actions',
     edit: 'Edit',
+    close: 'Close',
+    noLinks: 'No links',
+    add: 'Add',
+    titleWithKey: '{id} - {title}',
     typeLabels: {
       Task: 'Task',
       Bug: 'Bug',
@@ -174,6 +178,10 @@ const I18N = {
     exportCsv: 'Экспорт CSV',
     actions: 'Действия',
     edit: 'Изменить',
+    close: 'Закрыть',
+    noLinks: 'Нет связей',
+    add: 'Добавить',
+    titleWithKey: '{id} - {title}',
     typeLabels: {
       Task: 'Задача',
       Bug: 'Баг',
@@ -220,6 +228,16 @@ const detectBrowserLanguage = () => {
 };
 
 const getTranslatedLabel = (labels, value) => labels?.[value] ?? value;
+
+const formatIssueTitleWithKey = (issueId, issueTitle, t) => {
+  const safeIssueId = toSafeSingleLineText(issueId, 32);
+  const safeIssueTitle = toSafeSingleLineText(issueTitle, MAX_TITLE_LENGTH) || t.defaultIssueTitle;
+  const template = typeof t.titleWithKey === 'string' ? t.titleWithKey : '{id} - {title}';
+
+  return template
+    .replace('{id}', safeIssueId || '-')
+    .replace('{title}', safeIssueTitle);
+};
 
 const getInitialLanguage = () => {
   try {
@@ -1378,6 +1396,25 @@ const IssuesPage = ({ data, setData, t, language }) => {
     updateIssueRelations(targetIssueId, false);
   };
 
+  const handleIssueDetailChange = (fieldName, fieldValue) => {
+    const nextFormData = { ...formData, [fieldName]: fieldValue };
+    setFormData(nextFormData);
+
+    if (!currentIssue || isCreateMode) {
+      return;
+    }
+
+    const normalizedIssueData = normalizeIssueFormData(nextFormData, currentIssue, t.defaultIssueTitle);
+    setData((previousData) => ({
+      ...previousData,
+      issues: previousData.issues.map((candidate) => (
+        candidate.id === currentIssue.id
+          ? { ...candidate, ...normalizedIssueData }
+          : candidate
+      ))
+    }));
+  };
+
   const handleAddComment = () => {
     if (!currentIssue) {
       return;
@@ -1738,7 +1775,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
         </div>
       )}
 
-      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.viewIssue}: ${currentIssue.id}` : t.createIssue} width="1380px">
+      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? formatIssueTitleWithKey(currentIssue.id, currentIssue.title, t) : t.createIssue} width="1380px">
         <form onSubmit={handleFormSubmit}>
           <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
             {isCreateMode ? (
@@ -1768,7 +1805,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
                 <h3 style={{ fontSize: '13px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#344563' }}>{t.issueDetails}</h3>
                 <div>
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.type}</label>
-                  <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 34px 10px 10px', borderRadius: '8px' })}>
+                  <select value={formData.type} onChange={(e) => handleIssueDetailChange('type', e.target.value)} style={getSelectStyle({ width: '100%', padding: '10px 34px 10px 10px', borderRadius: '8px' })}>
                     <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
                     <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
                     <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
@@ -1776,7 +1813,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.priority}</label>
-                  <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 34px 10px 10px', borderRadius: '8px' })}>
+                  <select value={formData.priority} onChange={(e) => handleIssueDetailChange('priority', e.target.value)} style={getSelectStyle({ width: '100%', padding: '10px 34px 10px 10px', borderRadius: '8px' })}>
                     <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
                     <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
                     <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
@@ -1784,34 +1821,43 @@ const IssuesPage = ({ data, setData, t, language }) => {
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.storyPoints}</label>
-                  <input type="number" min="0" value={formData.storyPoints} onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })} style={{ width: '100%', padding: '10px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                  <input type="number" min="0" value={formData.storyPoints} onChange={(e) => handleIssueDetailChange('storyPoints', parseInt(e.target.value, 10) || 0)} style={{ width: '100%', padding: '10px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.assignee}</label>
-                  <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => setFormData({ ...formData, assignee: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                  <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => handleIssueDetailChange('assignee', e.target.value)} style={{ width: '100%', padding: '10px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
                 </div>
                 <div style={{ borderTop: '1px solid #E2E6ED', paddingTop: '12px' }}>
-                  <div style={{ fontSize: '12px', marginBottom: '8px', letterSpacing: '0.05em', textTransform: 'uppercase', color: '#6B778C' }}>{t.linkedIssues}</div>
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <div style={{ fontSize: '12px', letterSpacing: '0.05em', textTransform: 'uppercase', color: '#6B778C' }}>{t.linkedIssues}</div>
+                    <button
+                      type="button"
+                      onClick={handleAddRelation}
+                      disabled={!relationCandidateId}
+                      style={{ border: '1px solid #C3CCD9', borderRadius: '8px', width: '28px', height: '28px', fontSize: '18px', lineHeight: 1, color: relationCandidateId ? '#172B4D' : '#9AA5B1', background: '#fff', cursor: relationCandidateId ? 'pointer' : 'not-allowed' }}
+                      title={t.addLink}
+                      aria-label={t.addLink}
+                    >
+                      +
+                    </button>
+                  </div>
+                  <div style={{ marginBottom: '10px' }}>
                     <select
                       value={relationCandidateId}
                       onChange={(event) => setRelationCandidateId(event.target.value)}
                       style={getSelectStyle({ width: '100%', padding: '8px 34px 8px 10px', borderRadius: '8px', fontSize: '13px' })}
                     >
-                      <option value="">—</option>
+                      <option value="">{t.add}</option>
                       {data.issues.filter((candidate) => candidate.id !== currentIssue?.id && !(currentIssue?.relatesTo || []).includes(candidate.id)).map((candidate) => (
                         <option key={candidate.id} value={candidate.id}>{candidate.id} · {candidate.title}</option>
                       ))}
                     </select>
-                    <button type="button" onClick={handleAddRelation} disabled={!relationCandidateId} style={{ border: '1px solid #C3CCD9', borderRadius: '8px', padding: '0 12px', fontSize: '13px', color: relationCandidateId ? '#172B4D' : '#9AA5B1', background: '#fff', cursor: relationCandidateId ? 'pointer' : 'not-allowed' }}>
-                      {t.addLink}
-                    </button>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {(currentIssue?.relatesTo || []).length === 0 ? (
-                      <span style={{ color: '#6B778C', fontSize: '13px' }}>{t.noRelatedIssues}</span>
+                      <span style={{ color: '#6B778C', fontSize: '13px' }}>{t.noLinks}</span>
                     ) : (
-                      (currentIssue?.relatesTo || []).map((relatedId) => (
+                      (currentIssue?.relatesTo || []).slice(0, 1).map((relatedId) => (
                         <button key={relatedId} type="button" onClick={() => handleRemoveRelation(relatedId)} style={{ border: '1px solid #C3CCD9', background: '#fff', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>
                           {relatedId} ×
                         </button>
@@ -1824,14 +1870,19 @@ const IssuesPage = ({ data, setData, t, language }) => {
 
             <div style={{ border: '1px solid #DFE1E6', borderRadius: '14px', padding: '20px', background: '#FFFFFF' }}>
               <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.summary}</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }}
-                />
+                {isViewMode ? (
+                  <h2 style={{ fontSize: '30px', fontWeight: 700, lineHeight: 1.25, margin: 0 }}>
+                    {formatIssueTitleWithKey(currentIssue.id, formData.title, t)}
+                  </h2>
+                ) : (
+                  <input
+                    type="text"
+                    required
+                    value={formData.title}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                    style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit', fontSize: '26px', fontWeight: 700, lineHeight: 1.25 }}
+                  />
+                )}
               </div>
 
               {isCreateMode ? (
@@ -1839,7 +1890,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
                     <div>
                       <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.type}</label>
-                      <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
+                      <select value={formData.type} onChange={(e) => handleIssueDetailChange('type', e.target.value)} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
                         <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
                         <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
                         <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
@@ -1847,7 +1898,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
                     </div>
                     <div>
                       <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.priority}</label>
-                      <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
+                      <select value={formData.priority} onChange={(e) => handleIssueDetailChange('priority', e.target.value)} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
                         <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
                         <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
                         <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
@@ -1901,7 +1952,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
                     <div>
                       <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.storyPoints}</label>
-                      <input type="number" min="0" value={formData.storyPoints} onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                      <input type="number" min="0" value={formData.storyPoints} onChange={(e) => handleIssueDetailChange('storyPoints', parseInt(e.target.value, 10) || 0)} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
                     </div>
                     <div>
                       <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.dueDate}</label>
@@ -1911,7 +1962,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
 
                   <div style={{ marginBottom: '16px' }}>
                     <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.assignee}</label>
-                    <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => setFormData({ ...formData, assignee: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                    <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => handleIssueDetailChange('assignee', e.target.value)} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
                   </div>
                 </>
               ) : null}
@@ -2385,7 +2436,7 @@ const SprintPage = ({ data, setData, t, language }) => {
   );
 };
 
-const GanttPage = ({ data, t, language }) => {
+const GanttPage = ({ data, setData, t, language }) => {
   const [groupBy, setGroupBy] = useState('assignee');
   const [showRelations, setShowRelations] = useState(false);
   const [openedIssueId, setOpenedIssueId] = useState(null);
@@ -2394,7 +2445,26 @@ const GanttPage = ({ data, t, language }) => {
   const openedIssue = openedIssueId
     ? data.issues.find((issue) => issue.id === openedIssueId) ?? null
     : null;
+  const [ganttIssueMode, setGanttIssueMode] = useState('view');
+  const [ganttFormData, setGanttFormData] = useState({
+    title: '',
+    description: '',
+    dueDate: ''
+  });
   const today = startOfLocalDay(new Date());
+
+  useEffect(() => {
+    if (!openedIssue) {
+      return;
+    }
+
+    setGanttFormData({
+      title: openedIssue.title,
+      description: openedIssue.description,
+      dueDate: openedIssue.dueDate
+    });
+    setGanttIssueMode('view');
+  }, [openedIssueId, openedIssue]);
 
   const issuesWithRange = activeIssues.map((issue) => {
     const dueDate = parseLocalDate(issue.dueDate) ?? addDays(today, 5);
@@ -2560,6 +2630,24 @@ const GanttPage = ({ data, t, language }) => {
 
   const closeIssueModal = () => {
     setOpenedIssueId(null);
+    setGanttIssueMode('view');
+  };
+
+  const handleGanttIssueSave = () => {
+    if (!openedIssue) {
+      return;
+    }
+
+    const normalizedIssueData = normalizeIssueFormData(ganttFormData, openedIssue, t.defaultIssueTitle);
+    setData((previousData) => ({
+      ...previousData,
+      issues: previousData.issues.map((candidate) => (
+        candidate.id === openedIssue.id
+          ? { ...candidate, ...normalizedIssueData }
+          : candidate
+      ))
+    }));
+    setGanttIssueMode('view');
   };
 
   return (
@@ -2800,6 +2888,7 @@ const GanttPage = ({ data, t, language }) => {
                           onClick={(event) => {
                             event.stopPropagation();
                             setOpenedIssueId(issue.id);
+                            setGanttIssueMode('view');
                           }}
                           title={t.openIssue}
                           aria-label={t.openIssue}
@@ -2832,7 +2921,7 @@ const GanttPage = ({ data, t, language }) => {
       <Modal
         isOpen={Boolean(openedIssue)}
         onClose={closeIssueModal}
-        title={openedIssue ? `${t.openIssue}: ${openedIssue.id}` : t.openIssue}
+        title={openedIssue ? formatIssueTitleWithKey(openedIssue.id, openedIssue.title, t) : t.openIssue}
         width="760px"
       >
         {openedIssue && (
@@ -2869,18 +2958,35 @@ const GanttPage = ({ data, t, language }) => {
             </div>
 
             <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px' }}>
-              <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px' }}>{t.summary}</div>
-              <div style={{ fontSize: '15px', fontWeight: 600 }}>{openedIssue.title}</div>
+              {ganttIssueMode === 'edit' ? (
+                <input
+                  type="text"
+                  value={ganttFormData.title}
+                  onChange={(event) => setGanttFormData((previousData) => ({ ...previousData, title: event.target.value }))}
+                  style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit', fontSize: '24px', fontWeight: 700, lineHeight: 1.25 }}
+                />
+              ) : (
+                <h2 style={{ margin: 0, fontSize: '28px', fontWeight: 700, lineHeight: 1.25 }}>
+                  {formatIssueTitleWithKey(openedIssue.id, openedIssue.title, t)}
+                </h2>
+              )}
             </div>
 
             <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px' }}>
               <div style={{ fontSize: '11px', color: '#666', marginBottom: '6px' }}>{t.description}</div>
-              <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: '13px' }}>
-                {openedIssue.description || '-'}
-              </div>
+              {ganttIssueMode === 'edit' ? (
+                <textarea
+                  rows="9"
+                  value={ganttFormData.description}
+                  onChange={(event) => setGanttFormData((previousData) => ({ ...previousData, description: event.target.value }))}
+                  style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '10px', fontFamily: 'inherit', minHeight: '200px', resize: 'vertical' }}
+                />
+              ) : (
+                <MarkdownPreview description={openedIssue.description} t={t} />
+              )}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button
                 type="button"
                 onClick={closeIssueModal}
@@ -2894,8 +3000,25 @@ const GanttPage = ({ data, t, language }) => {
                   fontSize: '1rem'
                 }}
               >
-                {t.cancel}
+                {t.close}
               </button>
+              {ganttIssueMode === 'view' ? (
+                <button
+                  type="button"
+                  onClick={() => setGanttIssueMode('edit')}
+                  style={{ backgroundColor: 'var(--accent-color)', color: 'var(--text-color)', padding: '10px 20px', borderRadius: 'var(--radius-lg)', fontWeight: 500, border: 'none', fontFamily: 'inherit', cursor: 'pointer', fontSize: '1rem' }}
+                >
+                  {t.editIssue}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleGanttIssueSave}
+                  style={{ backgroundColor: 'var(--accent-color)', color: 'var(--text-color)', padding: '10px 20px', borderRadius: 'var(--radius-lg)', fontWeight: 500, border: 'none', fontFamily: 'inherit', cursor: 'pointer', fontSize: '1rem' }}
+                >
+                  {t.saveIssue}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -2962,7 +3085,7 @@ const App = () => {
         <Routes>
           <Route path="/" element={<IssuesPage data={data} setData={setData} t={t} language={language} />} />
           <Route path="/sprint" element={<SprintPage data={data} setData={setData} t={t} language={language} />} />
-          <Route path="/gantt" element={<GanttPage data={data} t={t} language={language} />} />
+          <Route path="/gantt" element={<GanttPage data={data} setData={setData} t={t} language={language} />} />
         </Routes>
       </div>
     </Router>
