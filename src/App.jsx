@@ -37,6 +37,13 @@ const I18N = {
     noRelatedIssues: 'No related issues yet',
     relatedSearchPlaceholder: 'Search by key or title',
     noMatchingIssues: 'No matching issues',
+    markdownHelp: 'Supports Markdown and code blocks with ```',
+    descriptionPreview: 'Preview',
+    linkedIssues: 'Linked',
+    addLink: 'Add link',
+    issueNotes: 'Issue notes',
+    issueDetails: 'Issue details',
+    markdownPreviewEmpty: 'Add a description to see Markdown preview',
     comments: 'Comments',
     commentPlaceholder: 'Write a comment...',
     addComment: 'Add comment',
@@ -113,6 +120,13 @@ const I18N = {
     noRelatedIssues: 'Пока нет связанных задач',
     relatedSearchPlaceholder: 'Поиск по ключу или названию',
     noMatchingIssues: 'Подходящие задачи не найдены',
+    markdownHelp: 'Поддерживается Markdown и блоки кода через ```',
+    descriptionPreview: 'Предпросмотр',
+    linkedIssues: 'Связанные',
+    addLink: 'Добавить связь',
+    issueNotes: 'Пометки по задаче',
+    issueDetails: 'Детали задачи',
+    markdownPreviewEmpty: 'Добавьте описание, чтобы увидеть предпросмотр Markdown',
     comments: 'Комментарии',
     commentPlaceholder: 'Напишите комментарий...',
     addComment: 'Добавить комментарий',
@@ -780,23 +794,182 @@ const Card = ({ issue, onClick, onDragStart, onDragEnd, t }) => {
   );
 };
 
-const IssueCollaborationPanel = ({
-  issue,
-  issues,
-  setData,
-  t,
-  language,
-  relationSearch,
-  setRelationSearch,
-  commentDraft,
-  setCommentDraft
-}) => {
+const renderMarkdownPreview = (text) => {
+  const source = toSafeMultilineText(text, MAX_DESCRIPTION_LENGTH);
+  const lines = source.split('\n');
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const rawLine = lines[index];
+    const trimmedLine = rawLine.trim();
+
+    if (!trimmedLine) {
+      index += 1;
+      continue;
+    }
+
+    if (trimmedLine.startsWith('```')) {
+      index += 1;
+      const codeLines = [];
+      while (index < lines.length && !lines[index].trim().startsWith('```')) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length && lines[index].trim().startsWith('```')) {
+        index += 1;
+      }
+      blocks.push({ type: 'code', content: codeLines.join('\n') });
+      continue;
+    }
+
+    if (trimmedLine.startsWith('- ')) {
+      const items = [];
+      while (index < lines.length && lines[index].trim().startsWith('- ')) {
+        items.push(lines[index].trim().slice(2));
+        index += 1;
+      }
+      blocks.push({ type: 'list', items });
+      continue;
+    }
+
+    if (trimmedLine.startsWith('### ')) {
+      blocks.push({ type: 'h3', content: trimmedLine.slice(4) });
+      index += 1;
+      continue;
+    }
+
+    if (trimmedLine.startsWith('## ')) {
+      blocks.push({ type: 'h2', content: trimmedLine.slice(3) });
+      index += 1;
+      continue;
+    }
+
+    if (trimmedLine.startsWith('# ')) {
+      blocks.push({ type: 'h1', content: trimmedLine.slice(2) });
+      index += 1;
+      continue;
+    }
+
+    const paragraph = [];
+    while (index < lines.length) {
+      const lineText = lines[index].trim();
+      if (!lineText || lineText.startsWith('#') || lineText.startsWith('- ') || lineText.startsWith('```')) {
+        break;
+      }
+      paragraph.push(lineText);
+      index += 1;
+    }
+    blocks.push({ type: 'paragraph', content: paragraph.join(' ') });
+  }
+
+  return blocks;
+};
+
+const renderInlineMarkdown = (text) => {
+  const safeText = toSafeMultilineText(text, MAX_DESCRIPTION_LENGTH);
+  const result = [];
+  const inlineCodePattern = /`([^`]+)`/g;
+  let lastIndex = 0;
+  let match = inlineCodePattern.exec(safeText);
+
+  while (match) {
+    if (match.index > lastIndex) {
+      result.push(safeText.slice(lastIndex, match.index));
+    }
+
+    result.push(
+      <code key={`code-${match.index}`} style={{
+        background: '#F2F4F7',
+        border: '1px solid #DEE3EA',
+        borderRadius: '6px',
+        padding: '1px 6px',
+        fontFamily: "'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
+        fontSize: '0.92em'
+      }}>{match[1]}</code>
+    );
+
+    lastIndex = match.index + match[0].length;
+    match = inlineCodePattern.exec(safeText);
+  }
+
+  if (lastIndex < safeText.length) {
+    result.push(safeText.slice(lastIndex));
+  }
+
+  return result;
+};
+
+const MarkdownPreview = ({ description, t }) => {
+  const blocks = renderMarkdownPreview(description);
+
+  if (blocks.length === 0) {
+    return <div style={{ color: '#6B778C', fontSize: '14px' }}>{t.markdownPreviewEmpty}</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      {blocks.map((block, blockIndex) => {
+        if (block.type === 'code') {
+          return (
+            <pre key={`md-${blockIndex}`} style={{
+              background: '#1F2937',
+              color: '#E5E7EB',
+              borderRadius: '10px',
+              padding: '14px',
+              fontSize: '13px',
+              overflowX: 'auto',
+              lineHeight: 1.5,
+              border: '1px solid #111827'
+            }}>
+              <code>{block.content}</code>
+            </pre>
+          );
+        }
+
+        if (block.type === 'list') {
+          return (
+            <ul key={`md-${blockIndex}`} style={{ paddingLeft: '20px', color: '#2E3A4D', lineHeight: 1.5 }}>
+              {block.items.map((item, itemIndex) => (
+                <li key={`md-item-${blockIndex}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+              ))}
+            </ul>
+          );
+        }
+
+        const content = renderInlineMarkdown(block.content);
+        if (block.type === 'h1') {
+          return <h1 key={`md-${blockIndex}`} style={{ fontSize: '24px', letterSpacing: '-0.01em' }}>{content}</h1>;
+        }
+
+        if (block.type === 'h2') {
+          return <h2 key={`md-${blockIndex}`} style={{ fontSize: '20px', letterSpacing: '-0.01em' }}>{content}</h2>;
+        }
+
+        if (block.type === 'h3') {
+          return <h3 key={`md-${blockIndex}`} style={{ fontSize: '16px' }}>{content}</h3>;
+        }
+
+        return (
+          <p key={`md-${blockIndex}`} style={{ color: '#2E3A4D', lineHeight: 1.6 }}>
+            {content}
+          </p>
+        );
+      })}
+    </div>
+  );
+};
+
+const IssueNotesSidebar = ({ issue, formData, t, relationCandidateId, setRelationCandidateId, onAddRelation, onRemoveRelation, issues }) => {
   if (!issue) {
     return (
       <aside style={{
+        background: '#F7F8FB',
+        border: '1px solid #E6E8EE',
+        borderRadius: '14px',
+        padding: '16px',
         alignSelf: 'start',
-        color: '#666',
-        paddingTop: '8px'
+        color: '#5E6C84'
       }}>
         {t.availableAfterCreate}
       </aside>
@@ -804,218 +977,160 @@ const IssueCollaborationPanel = ({
   }
 
   const relatedIssueIds = Array.isArray(issue.relatesTo) ? issue.relatesTo : [];
+  const relatedIssues = relatedIssueIds
+    .map((issueId) => issues.find((candidate) => candidate.id === issueId))
+    .filter(Boolean);
+
+  const relationCandidates = issues.filter((candidate) => candidate.id !== issue.id && !relatedIssueIds.includes(candidate.id));
+
+  return (
+    <aside style={{
+      background: '#F7F8FB',
+      border: '1px solid #E6E8EE',
+      borderRadius: '14px',
+      padding: '18px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '16px',
+      alignSelf: 'start',
+      position: 'sticky',
+      top: '8px'
+    }}>
+      <h3 style={{ fontSize: '13px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#344563' }}>{t.issueNotes}</h3>
+
+      <div style={{ display: 'grid', gap: '8px' }}>
+        {[ 
+          [t.type, getTranslatedLabel(t.typeLabels, formData.type)],
+          [t.priority, getTranslatedLabel(t.priorityLabels, formData.priority)],
+          [t.storyPoints, String(formData.storyPoints)],
+          [t.dueDate, formData.dueDate || '—'],
+          [t.assignee, formData.assignee || '—']
+        ].map(([label, value]) => (
+          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '13px' }}>
+            <span style={{ color: '#6B778C' }}>{label}</span>
+            <span style={{ color: '#172B4D', fontWeight: 500, textAlign: 'right' }}>{value}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ borderTop: '1px solid #E2E6ED', paddingTop: '14px' }}>
+        <div style={{ fontSize: '12px', marginBottom: '8px', letterSpacing: '0.05em', textTransform: 'uppercase', color: '#6B778C' }}>{t.linkedIssues}</div>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+          <select
+            value={relationCandidateId}
+            onChange={(event) => setRelationCandidateId(event.target.value)}
+            style={getSelectStyle({ width: '100%', padding: '8px 34px 8px 10px', borderRadius: '8px', fontSize: '13px' })}
+          >
+            <option value="">—</option>
+            {relationCandidates.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>{candidate.id} · {candidate.title}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={onAddRelation}
+            disabled={!relationCandidateId}
+            style={{
+              border: '1px solid #C3CCD9',
+              borderRadius: '8px',
+              padding: '0 12px',
+              fontSize: '13px',
+              color: relationCandidateId ? '#172B4D' : '#9AA5B1',
+              background: '#fff',
+              cursor: relationCandidateId ? 'pointer' : 'not-allowed'
+            }}
+          >
+            {t.addLink}
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+          {relatedIssues.length === 0 ? (
+            <span style={{ color: '#6B778C', fontSize: '13px' }}>{t.noRelatedIssues}</span>
+          ) : (
+            relatedIssues.map((relatedIssue) => (
+              <button
+                key={relatedIssue.id}
+                type="button"
+                onClick={() => onRemoveRelation(relatedIssue.id)}
+                style={{
+                  border: '1px solid #C3CCD9',
+                  background: '#fff',
+                  borderRadius: '999px',
+                  padding: '6px 10px',
+                  fontSize: '12px',
+                  color: '#344563'
+                }}
+                title={relatedIssue.title}
+              >
+                {relatedIssue.id} ×
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+};
+
+const IssueCommentsSection = ({ issue, commentDraft, setCommentDraft, onAddComment, t, language }) => {
+  if (!issue) {
+    return null;
+  }
+
   const issueComments = Array.isArray(issue.comments) ? issue.comments : [];
-  const normalizedSearch = relationSearch.trim().toLowerCase();
-  const relationCandidates = issues
-    .filter((candidate) => candidate.id !== issue.id)
-    .filter((candidate) => {
-      if (!normalizedSearch) {
-        return true;
-      }
-
-      return candidate.id.toLowerCase().includes(normalizedSearch)
-        || candidate.title.toLowerCase().includes(normalizedSearch);
-    });
-
-  const handleToggleRelation = (targetIssueId, shouldBeLinked) => {
-    if (!targetIssueId || targetIssueId === issue.id) {
-      return;
-    }
-
-    setData((previousData) => {
-      let hasChanges = false;
-      const updatedIssues = previousData.issues.map((candidate) => {
-        const candidateRelations = Array.isArray(candidate.relatesTo) ? candidate.relatesTo : [];
-
-        if (candidate.id === issue.id) {
-          if (shouldBeLinked) {
-            if (candidateRelations.includes(targetIssueId)) {
-              return candidate;
-            }
-            hasChanges = true;
-            return { ...candidate, relatesTo: [...candidateRelations, targetIssueId] };
-          }
-
-          if (!candidateRelations.includes(targetIssueId)) {
-            return candidate;
-          }
-
-          hasChanges = true;
-          return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== targetIssueId) };
-        }
-
-        if (candidate.id === targetIssueId) {
-          if (shouldBeLinked) {
-            if (candidateRelations.includes(issue.id)) {
-              return candidate;
-            }
-            hasChanges = true;
-            return { ...candidate, relatesTo: [...candidateRelations, issue.id] };
-          }
-
-          if (!candidateRelations.includes(issue.id)) {
-            return candidate;
-          }
-
-          hasChanges = true;
-          return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== issue.id) };
-        }
-
-        return candidate;
-      });
-
-      return hasChanges ? { ...previousData, issues: updatedIssues } : previousData;
-    });
-  };
-
-  const handleAddComment = () => {
-    const normalizedText = toSafeMultilineText(commentDraft, MAX_COMMENT_LENGTH);
-    if (!normalizedText) {
-      return;
-    }
-
-    const newComment = {
-      id: `CMT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      text: normalizedText.slice(0, 1000),
-      author: 'Admin',
-      createdAt: new Date().toISOString()
-    };
-
-    setData((previousData) => ({
-      ...previousData,
-      issues: previousData.issues.map((candidate) => {
-        if (candidate.id !== issue.id) {
-          return candidate;
-        }
-
-        const candidateComments = Array.isArray(candidate.comments) ? candidate.comments : [];
-        return { ...candidate, comments: [...candidateComments, newComment] };
-      })
-    }));
-
-    setCommentDraft('');
-  };
-
   const safeCommentDraft = toSafeMultilineText(commentDraft, MAX_COMMENT_LENGTH);
 
   return (
-    <aside style={{ alignSelf: 'start' }}>
-      <section style={{ marginBottom: '26px', paddingBottom: '18px', borderBottom: '1px solid var(--border-color)' }}>
-        <h3 style={{ fontSize: '14px', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          {t.relatedIssues}
-        </h3>
-        <input
-          type="text"
-          value={relationSearch}
-          onChange={(event) => setRelationSearch(event.target.value)}
-          placeholder={t.relatedSearchPlaceholder}
-          style={{
-            width: '100%',
-            padding: '10px 12px',
-            border: '1px solid var(--border-color)',
-            borderRadius: '10px',
-            fontFamily: 'inherit',
-            marginBottom: '10px'
-          }}
-        />
+    <section style={{ marginTop: '24px', borderTop: '1px solid #DFE1E6', paddingTop: '20px' }}>
+      <h3 style={{ fontSize: '15px', marginBottom: '10px', color: '#172B4D' }}>{t.comments}</h3>
+      <textarea
+        rows="4"
+        value={commentDraft}
+        placeholder={t.commentPlaceholder}
+        onChange={(event) => setCommentDraft(event.target.value)}
+        style={{
+          width: '100%',
+          border: '1px solid #C8D0DC',
+          borderRadius: '10px',
+          padding: '10px 12px',
+          fontFamily: 'inherit',
+          resize: 'vertical',
+          minHeight: '96px',
+          marginBottom: '10px'
+        }}
+      />
+      <button
+        type="button"
+        onClick={onAddComment}
+        disabled={!safeCommentDraft}
+        style={{
+          border: '1px solid #C3CCD9',
+          borderRadius: '8px',
+          padding: '8px 12px',
+          background: '#fff',
+          color: safeCommentDraft ? '#172B4D' : '#9AA5B1',
+          cursor: safeCommentDraft ? 'pointer' : 'not-allowed',
+          marginBottom: '14px'
+        }}
+      >
+        {t.addComment}
+      </button>
 
-        {relationCandidates.length === 0 ? (
-          <div style={{ color: '#666', fontSize: '13px' }}>
-            {normalizedSearch ? t.noMatchingIssues : t.noRelatedIssues}
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '260px', overflowY: 'auto', paddingRight: '4px' }}>
-            {relationCandidates.map((candidate) => {
-              const isLinked = relatedIssueIds.includes(candidate.id);
-
-              return (
-                <label
-                  key={candidate.id}
-                  style={{
-                    display: 'flex',
-                    gap: '10px',
-                    alignItems: 'flex-start',
-                    paddingBottom: '8px',
-                    borderBottom: '1px solid var(--border-color)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isLinked}
-                    onChange={(event) => handleToggleRelation(candidate.id, event.target.checked)}
-                    style={{ marginTop: '2px' }}
-                  />
-                  <span style={{ minWidth: '0' }}>
-                    <span style={{ display: 'block', fontWeight: 600, fontSize: '12px' }}>{candidate.id}</span>
-                    <span style={{ display: 'block', fontSize: '12px', color: '#555' }}>{candidate.title}</span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section>
-        <h3 style={{ fontSize: '14px', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          {t.comments}
-        </h3>
-        <textarea
-          rows="5"
-          value={commentDraft}
-          placeholder={t.commentPlaceholder}
-          onChange={(event) => setCommentDraft(event.target.value)}
-          style={{
-            width: '100%',
-            padding: '10px',
-            border: '1px solid var(--border-color)',
-            borderRadius: '10px',
-            fontFamily: 'inherit',
-            resize: 'vertical',
-            marginBottom: '8px',
-            minHeight: '110px'
-          }}
-        />
-        <button
-          type="button"
-          onClick={handleAddComment}
-          disabled={!safeCommentDraft}
-          style={{
-            border: '1px solid var(--border-color)',
-            borderRadius: '10px',
-            padding: '8px 10px',
-            background: '#fff',
-            color: safeCommentDraft ? 'var(--text-color)' : '#A0A0A0',
-            cursor: safeCommentDraft ? 'pointer' : 'not-allowed',
-            marginBottom: '12px'
-          }}
-        >
-          {t.addComment}
-        </button>
-
-        {issueComments.length === 0 ? (
-          <div style={{ color: '#666', fontSize: '13px' }}>{t.noComments}</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', height: '320px', overflowY: 'auto', paddingRight: '4px' }}>
-            {issueComments.map((comment, index) => (
-              <div
-                key={comment.id}
-                style={{
-                  padding: '10px 0',
-                  borderBottom: index === issueComments.length - 1 ? 'none' : '1px solid var(--border-color)'
-                }}
-              >
-                <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>
-                  {comment.author} - {formatCommentDate(comment.createdAt, language)}
-                </div>
-                <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{comment.text}</div>
+      {issueComments.length === 0 ? (
+        <div style={{ color: '#6B778C', fontSize: '13px' }}>{t.noComments}</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {issueComments.map((comment) => (
+            <article key={comment.id} style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '10px 12px', background: '#FAFBFD' }}>
+              <div style={{ fontSize: '11px', color: '#6B778C', marginBottom: '4px' }}>
+                {comment.author} · {formatCommentDate(comment.createdAt, language)}
               </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </aside>
+              <div style={{ fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#253858' }}>{comment.text}</div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 };
 
@@ -1029,7 +1144,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
   const [showCapybaraEasterEgg, setShowCapybaraEasterEgg] = useState(false);
-  const [relationSearch, setRelationSearch] = useState('');
+  const [relationCandidateId, setRelationCandidateId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
   const listEndRef = useRef(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1081,7 +1196,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
       clearIssueQueryParam();
     }
 
-    setRelationSearch('');
+    setRelationCandidateId('');
     setCommentDraft('');
 
     if (issue) {
@@ -1113,7 +1228,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
   const closeModal = () => {
     setModalOpen(false);
     setEditingIssue(null);
-    setRelationSearch('');
+    setRelationCandidateId('');
     setCommentDraft('');
     clearIssueQueryParam();
   };
@@ -1167,6 +1282,89 @@ const IssuesPage = ({ data, setData, t, language }) => {
       setData({ ...data, issues: updatedIssues });
     }
     setDragOverColumn(null);
+  };
+
+  const updateIssueRelations = (targetIssueId, shouldLink) => {
+    if (!currentIssue || !targetIssueId || targetIssueId === currentIssue.id) {
+      return;
+    }
+
+    setData((previousData) => {
+      let hasChanges = false;
+      const updatedIssues = previousData.issues.map((candidate) => {
+        const candidateRelations = Array.isArray(candidate.relatesTo) ? candidate.relatesTo : [];
+
+        if (candidate.id === currentIssue.id) {
+          if (shouldLink && !candidateRelations.includes(targetIssueId)) {
+            hasChanges = true;
+            return { ...candidate, relatesTo: [...candidateRelations, targetIssueId] };
+          }
+          if (!shouldLink && candidateRelations.includes(targetIssueId)) {
+            hasChanges = true;
+            return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== targetIssueId) };
+          }
+        }
+
+        if (candidate.id === targetIssueId) {
+          if (shouldLink && !candidateRelations.includes(currentIssue.id)) {
+            hasChanges = true;
+            return { ...candidate, relatesTo: [...candidateRelations, currentIssue.id] };
+          }
+          if (!shouldLink && candidateRelations.includes(currentIssue.id)) {
+            hasChanges = true;
+            return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== currentIssue.id) };
+          }
+        }
+
+        return candidate;
+      });
+
+      return hasChanges ? { ...previousData, issues: updatedIssues } : previousData;
+    });
+  };
+
+  const handleAddRelation = () => {
+    if (!relationCandidateId) {
+      return;
+    }
+    updateIssueRelations(relationCandidateId, true);
+    setRelationCandidateId('');
+  };
+
+  const handleRemoveRelation = (targetIssueId) => {
+    updateIssueRelations(targetIssueId, false);
+  };
+
+  const handleAddComment = () => {
+    if (!currentIssue) {
+      return;
+    }
+
+    const normalizedText = toSafeMultilineText(commentDraft, MAX_COMMENT_LENGTH);
+    if (!normalizedText) {
+      return;
+    }
+
+    const newComment = {
+      id: `CMT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text: normalizedText,
+      author: 'Admin',
+      createdAt: new Date().toISOString()
+    };
+
+    setData((previousData) => ({
+      ...previousData,
+      issues: previousData.issues.map((candidate) => {
+        if (candidate.id !== currentIssue.id) {
+          return candidate;
+        }
+
+        const existingComments = Array.isArray(candidate.comments) ? candidate.comments : [];
+        return { ...candidate, comments: [...existingComments, newComment] };
+      })
+    }));
+
+    setCommentDraft('');
   };
 
   const filteredIssues = getFilteredIssues();
@@ -1494,73 +1692,44 @@ const IssuesPage = ({ data, setData, t, language }) => {
         </div>
       )}
 
-      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.editIssue} ${currentIssue.id}` : t.createIssue} width="1240px">
+      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.editIssue} ${currentIssue.id}` : t.createIssue} width="1380px">
         <form onSubmit={handleFormSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 430px', gap: '28px', alignItems: 'start' }}>
-            <div>
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  fontSize: '12px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}>{t.summary}</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
+            <IssueNotesSidebar
+              issue={currentIssue}
+              formData={formData}
+              t={t}
+              issues={data.issues}
+              relationCandidateId={relationCandidateId}
+              setRelationCandidateId={setRelationCandidateId}
+              onAddRelation={handleAddRelation}
+              onRemoveRelation={handleRemoveRelation}
+            />
+
+            <div style={{ border: '1px solid #DFE1E6', borderRadius: '14px', padding: '20px', background: '#FFFFFF' }}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.summary}</label>
                 <input
                   type="text"
                   required
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    fontFamily: 'inherit'
-                  }}
+                  style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }}
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
                 <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>{t.type}</label>
-                  <select
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                    style={getSelectStyle({
-                      width: '100%',
-                      padding: '12px 40px 12px 12px',
-                      borderRadius: '8px'
-                    })}
-                  >
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.type}</label>
+                  <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
                     <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
                     <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
                     <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
                   </select>
                 </div>
                 <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>{t.priority}</label>
-                  <select
-                    value={formData.priority}
-                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                    style={getSelectStyle({
-                      width: '100%',
-                      padding: '12px 40px 12px 12px',
-                      borderRadius: '8px'
-                    })}
-                  >
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.priority}</label>
+                  <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
                     <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
                     <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
                     <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
@@ -1568,144 +1737,53 @@ const IssuesPage = ({ data, setData, t, language }) => {
                 </div>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  fontSize: '12px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}>{t.description}</label>
+              <section style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'baseline' }}>
+                  <label style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.description}</label>
+                  <span style={{ fontSize: '12px', color: '#6B778C' }}>{t.markdownHelp}</span>
+                </div>
                 <textarea
-                  rows="4"
+                  rows="10"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    fontFamily: 'inherit'
-                  }}
+                  style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '10px', fontFamily: 'inherit', minHeight: '220px', resize: 'vertical', marginBottom: '12px' }}
                 />
-              </div>
+                <div style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '12px', background: '#FBFCFF' }}>
+                  <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', color: '#6B778C' }}>{t.descriptionPreview}</div>
+                  <MarkdownPreview description={formData.description} t={t} />
+                </div>
+              </section>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
                 <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>{t.storyPoints}</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.storyPoints}
-                    onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      fontFamily: 'inherit'
-                    }}
-                  />
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.storyPoints}</label>
+                  <input type="number" min="0" value={formData.storyPoints} onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
                 </div>
                 <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>{t.dueDate}</label>
-                  <input
-                    type="date"
-                    value={formData.dueDate}
-                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      fontFamily: 'inherit'
-                    }}
-                  />
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.dueDate}</label>
+                  <input type="date" value={formData.dueDate} onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
                 </div>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  fontSize: '12px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}>{t.assignee}</label>
-                <input
-                  type="text"
-                  placeholder={t.assigneePlaceholder}
-                  value={formData.assignee}
-                  onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    fontFamily: 'inherit'
-                  }}
-                />
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.assignee}</label>
+                <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => setFormData({ ...formData, assignee: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
               </div>
 
               <div style={{ textAlign: 'right' }}>
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  style={{
-                    border: '1px solid var(--border-color)',
-                    padding: '10px 20px',
-                    borderRadius: 'var(--radius-lg)',
-                    fontFamily: 'inherit',
-                    cursor: 'pointer',
-                    background: 'none',
-                    fontSize: '1rem',
-                    marginRight: '12px'
-                  }}
-                >
-                  {t.cancel}
-                </button>
-                <button
-                  type="submit"
-                  style={{
-                    backgroundColor: 'var(--accent-color)',
-                    color: 'var(--text-color)',
-                    padding: '12px 24px',
-                    borderRadius: 'var(--radius-lg)',
-                    fontWeight: 500,
-                    border: 'none',
-                    fontFamily: 'inherit',
-                    cursor: 'pointer',
-                    fontSize: '1rem'
-                  }}
-                >
-                  {t.saveIssue}
-                </button>
+                <button type="button" onClick={closeModal} style={{ border: '1px solid var(--border-color)', padding: '10px 20px', borderRadius: 'var(--radius-lg)', fontFamily: 'inherit', cursor: 'pointer', background: 'none', fontSize: '1rem', marginRight: '12px' }}>{t.cancel}</button>
+                <button type="submit" style={{ backgroundColor: 'var(--accent-color)', color: 'var(--text-color)', padding: '12px 24px', borderRadius: 'var(--radius-lg)', fontWeight: 500, border: 'none', fontFamily: 'inherit', cursor: 'pointer', fontSize: '1rem' }}>{t.saveIssue}</button>
               </div>
-            </div>
 
-            <IssueCollaborationPanel
-              issue={currentIssue}
-              issues={data.issues}
-              setData={setData}
-              t={t}
-              language={language}
-              relationSearch={relationSearch}
-              setRelationSearch={setRelationSearch}
-              commentDraft={commentDraft}
-              setCommentDraft={setCommentDraft}
-            />
+              <IssueCommentsSection
+                issue={currentIssue}
+                commentDraft={commentDraft}
+                setCommentDraft={setCommentDraft}
+                onAddComment={handleAddComment}
+                t={t}
+                language={language}
+              />
+            </div>
           </div>
         </form>
       </Modal>
@@ -1718,7 +1796,7 @@ const SprintPage = ({ data, setData, t, language }) => {
   const [sortField, setSortField] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingIssue, setEditingIssue] = useState(null);
-  const [relationSearch, setRelationSearch] = useState('');
+  const [relationCandidateId, setRelationCandidateId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
 
   const [formData, setFormData] = useState({
@@ -1754,7 +1832,7 @@ const SprintPage = ({ data, setData, t, language }) => {
   };
 
   const openModal = (issue) => {
-    setRelationSearch('');
+    setRelationCandidateId('');
     setCommentDraft('');
     setEditingIssue(issue);
     setFormData({
@@ -1772,7 +1850,7 @@ const SprintPage = ({ data, setData, t, language }) => {
   const closeModal = () => {
     setModalOpen(false);
     setEditingIssue(null);
-    setRelationSearch('');
+    setRelationCandidateId('');
     setCommentDraft('');
   };
 
@@ -1786,6 +1864,89 @@ const SprintPage = ({ data, setData, t, language }) => {
     setData({ ...data, issues: updatedIssues });
     
     closeModal();
+  };
+
+  const updateIssueRelations = (targetIssueId, shouldLink) => {
+    if (!currentIssue || !targetIssueId || targetIssueId === currentIssue.id) {
+      return;
+    }
+
+    setData((previousData) => {
+      let hasChanges = false;
+      const updatedIssues = previousData.issues.map((candidate) => {
+        const candidateRelations = Array.isArray(candidate.relatesTo) ? candidate.relatesTo : [];
+
+        if (candidate.id === currentIssue.id) {
+          if (shouldLink && !candidateRelations.includes(targetIssueId)) {
+            hasChanges = true;
+            return { ...candidate, relatesTo: [...candidateRelations, targetIssueId] };
+          }
+          if (!shouldLink && candidateRelations.includes(targetIssueId)) {
+            hasChanges = true;
+            return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== targetIssueId) };
+          }
+        }
+
+        if (candidate.id === targetIssueId) {
+          if (shouldLink && !candidateRelations.includes(currentIssue.id)) {
+            hasChanges = true;
+            return { ...candidate, relatesTo: [...candidateRelations, currentIssue.id] };
+          }
+          if (!shouldLink && candidateRelations.includes(currentIssue.id)) {
+            hasChanges = true;
+            return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== currentIssue.id) };
+          }
+        }
+
+        return candidate;
+      });
+
+      return hasChanges ? { ...previousData, issues: updatedIssues } : previousData;
+    });
+  };
+
+  const handleAddRelation = () => {
+    if (!relationCandidateId) {
+      return;
+    }
+    updateIssueRelations(relationCandidateId, true);
+    setRelationCandidateId('');
+  };
+
+  const handleRemoveRelation = (targetIssueId) => {
+    updateIssueRelations(targetIssueId, false);
+  };
+
+  const handleAddComment = () => {
+    if (!currentIssue) {
+      return;
+    }
+
+    const normalizedText = toSafeMultilineText(commentDraft, MAX_COMMENT_LENGTH);
+    if (!normalizedText) {
+      return;
+    }
+
+    const newComment = {
+      id: `CMT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text: normalizedText,
+      author: 'Admin',
+      createdAt: new Date().toISOString()
+    };
+
+    setData((previousData) => ({
+      ...previousData,
+      issues: previousData.issues.map((candidate) => {
+        if (candidate.id !== currentIssue.id) {
+          return candidate;
+        }
+
+        const existingComments = Array.isArray(candidate.comments) ? candidate.comments : [];
+        return { ...candidate, comments: [...existingComments, newComment] };
+      })
+    }));
+
+    setCommentDraft('');
   };
 
   const exportCSV = () => {
@@ -1975,73 +2136,38 @@ const SprintPage = ({ data, setData, t, language }) => {
         </div>
       </div>
 
-      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.editIssue} ${currentIssue.id}` : t.createIssue} width="1240px">
+      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.editIssue} ${currentIssue.id}` : t.createIssue} width="1380px">
         <form onSubmit={handleFormSubmit}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 430px', gap: '28px', alignItems: 'start' }}>
-            <div>
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  fontSize: '12px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}>{t.summary}</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    fontFamily: 'inherit'
-                  }}
-                />
+          <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
+            <IssueNotesSidebar
+              issue={currentIssue}
+              formData={formData}
+              t={t}
+              issues={data.issues}
+              relationCandidateId={relationCandidateId}
+              setRelationCandidateId={setRelationCandidateId}
+              onAddRelation={handleAddRelation}
+              onRemoveRelation={handleRemoveRelation}
+            />
+
+            <div style={{ border: '1px solid #DFE1E6', borderRadius: '14px', padding: '20px', background: '#FFFFFF' }}>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.summary}</label>
+                <input type="text" required value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
                 <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>{t.type}</label>
-                  <select
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                    style={getSelectStyle({
-                      width: '100%',
-                      padding: '12px 40px 12px 12px',
-                      borderRadius: '8px'
-                    })}
-                  >
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.type}</label>
+                  <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
                     <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
                     <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
                     <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
                   </select>
                 </div>
                 <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>{t.priority}</label>
-                  <select
-                    value={formData.priority}
-                    onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-                    style={getSelectStyle({
-                      width: '100%',
-                      padding: '12px 40px 12px 12px',
-                      borderRadius: '8px'
-                    })}
-                  >
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.priority}</label>
+                  <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
                     <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
                     <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
                     <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
@@ -2049,144 +2175,48 @@ const SprintPage = ({ data, setData, t, language }) => {
                 </div>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  fontSize: '12px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}>{t.description}</label>
-                <textarea
-                  rows="4"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    fontFamily: 'inherit'
-                  }}
-                />
-              </div>
+              <section style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'baseline' }}>
+                  <label style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.description}</label>
+                  <span style={{ fontSize: '12px', color: '#6B778C' }}>{t.markdownHelp}</span>
+                </div>
+                <textarea rows="10" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '10px', fontFamily: 'inherit', minHeight: '220px', resize: 'vertical', marginBottom: '12px' }} />
+                <div style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '12px', background: '#FBFCFF' }}>
+                  <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', color: '#6B778C' }}>{t.descriptionPreview}</div>
+                  <MarkdownPreview description={formData.description} t={t} />
+                </div>
+              </section>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
                 <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>{t.storyPoints}</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={formData.storyPoints}
-                    onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      fontFamily: 'inherit'
-                    }}
-                  />
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.storyPoints}</label>
+                  <input type="number" min="0" value={formData.storyPoints} onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
                 </div>
                 <div>
-                  <label style={{
-                    display: 'block',
-                    marginBottom: '8px',
-                    fontSize: '12px',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>{t.dueDate}</label>
-                  <input
-                    type="date"
-                    value={formData.dueDate}
-                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      fontFamily: 'inherit'
-                    }}
-                  />
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.dueDate}</label>
+                  <input type="date" value={formData.dueDate} onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
                 </div>
               </div>
 
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  fontSize: '12px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}>{t.assignee}</label>
-                <input
-                  type="text"
-                  placeholder={t.assigneePlaceholder}
-                  value={formData.assignee}
-                  onChange={(e) => setFormData({ ...formData, assignee: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '8px',
-                    fontFamily: 'inherit'
-                  }}
-                />
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.assignee}</label>
+                <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => setFormData({ ...formData, assignee: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
               </div>
 
               <div style={{ textAlign: 'right' }}>
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  style={{
-                    border: '1px solid var(--border-color)',
-                    padding: '10px 20px',
-                    borderRadius: 'var(--radius-lg)',
-                    fontFamily: 'inherit',
-                    cursor: 'pointer',
-                    background: 'none',
-                    fontSize: '1rem',
-                    marginRight: '12px'
-                  }}
-                >
-                  {t.cancel}
-                </button>
-                <button
-                  type="submit"
-                  style={{
-                    backgroundColor: 'var(--accent-color)',
-                    color: 'var(--text-color)',
-                    padding: '12px 24px',
-                    borderRadius: 'var(--radius-lg)',
-                    fontWeight: 500,
-                    border: 'none',
-                    fontFamily: 'inherit',
-                    cursor: 'pointer',
-                    fontSize: '1rem'
-                  }}
-                >
-                  {t.saveIssue}
-                </button>
+                <button type="button" onClick={closeModal} style={{ border: '1px solid var(--border-color)', padding: '10px 20px', borderRadius: 'var(--radius-lg)', fontFamily: 'inherit', cursor: 'pointer', background: 'none', fontSize: '1rem', marginRight: '12px' }}>{t.cancel}</button>
+                <button type="submit" style={{ backgroundColor: 'var(--accent-color)', color: 'var(--text-color)', padding: '12px 24px', borderRadius: 'var(--radius-lg)', fontWeight: 500, border: 'none', fontFamily: 'inherit', cursor: 'pointer', fontSize: '1rem' }}>{t.saveIssue}</button>
               </div>
-            </div>
 
-            <IssueCollaborationPanel
-              issue={currentIssue}
-              issues={data.issues}
-              setData={setData}
-              t={t}
-              language={language}
-              relationSearch={relationSearch}
-              setRelationSearch={setRelationSearch}
-              commentDraft={commentDraft}
-              setCommentDraft={setCommentDraft}
-            />
+              <IssueCommentsSection
+                issue={currentIssue}
+                commentDraft={commentDraft}
+                setCommentDraft={setCommentDraft}
+                onAddComment={handleAddComment}
+                t={t}
+                language={language}
+              />
+            </div>
           </div>
         </form>
       </Modal>
