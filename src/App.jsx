@@ -44,6 +44,9 @@ const I18N = {
     issueNotes: 'Issue notes',
     issueDetails: 'Issue details',
     markdownPreviewEmpty: 'Add a description to see Markdown preview',
+    viewIssue: 'Issue view',
+    showPreview: 'Show preview',
+    createLinkedIssue: 'Create linked issue',
     comments: 'Comments',
     commentPlaceholder: 'Write a comment...',
     addComment: 'Add comment',
@@ -127,6 +130,9 @@ const I18N = {
     issueNotes: 'Пометки по задаче',
     issueDetails: 'Детали задачи',
     markdownPreviewEmpty: 'Добавьте описание, чтобы увидеть предпросмотр Markdown',
+    viewIssue: 'Просмотр задачи',
+    showPreview: 'Посмотреть предпросмотр',
+    createLinkedIssue: 'Создать связанную задачу',
     comments: 'Комментарии',
     commentPlaceholder: 'Напишите комментарий...',
     addComment: 'Добавить комментарий',
@@ -1146,6 +1152,9 @@ const IssuesPage = ({ data, setData, t, language }) => {
   const [showCapybaraEasterEgg, setShowCapybaraEasterEgg] = useState(false);
   const [relationCandidateId, setRelationCandidateId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
+  const [issueMode, setIssueMode] = useState('create');
+  const [showEditPreview, setShowEditPreview] = useState(false);
+  const [pendingLinkedIssueId, setPendingLinkedIssueId] = useState('');
   const listEndRef = useRef(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -1191,16 +1200,24 @@ const IssuesPage = ({ data, setData, t, language }) => {
   };
 
   const openModal = (issue = null, options = {}) => {
-    const { keepIssueQuery = false } = options;
+    const {
+      keepIssueQuery = false,
+      mode = issue ? 'view' : 'create',
+      linkedToIssueId = ''
+    } = options;
+
     if (!keepIssueQuery) {
       clearIssueQueryParam();
     }
 
     setRelationCandidateId('');
     setCommentDraft('');
+    setShowEditPreview(false);
 
     if (issue) {
+      setPendingLinkedIssueId('');
       setEditingIssue(issue);
+      setIssueMode(mode);
       setFormData({
         title: issue.title,
         description: issue.description,
@@ -1212,6 +1229,8 @@ const IssuesPage = ({ data, setData, t, language }) => {
       });
     } else {
       setEditingIssue(null);
+      setIssueMode('create');
+      setPendingLinkedIssueId(linkedToIssueId || '');
       setFormData({
         title: '',
         description: '',
@@ -1221,6 +1240,9 @@ const IssuesPage = ({ data, setData, t, language }) => {
         dueDate: '',
         assignee: ''
       });
+      if (linkedToIssueId) {
+        setRelationCandidateId(linkedToIssueId);
+      }
     }
     setModalOpen(true);
   };
@@ -1228,6 +1250,9 @@ const IssuesPage = ({ data, setData, t, language }) => {
   const closeModal = () => {
     setModalOpen(false);
     setEditingIssue(null);
+    setIssueMode('create');
+    setShowEditPreview(false);
+    setPendingLinkedIssueId('');
     setRelationCandidateId('');
     setCommentDraft('');
     clearIssueQueryParam();
@@ -1244,6 +1269,8 @@ const IssuesPage = ({ data, setData, t, language }) => {
       setData({ ...data, issues: updatedIssues });
     } else {
       const nextIssueId = clampInteger(data.lastId, 0, 999999, 0) + 1;
+      const normalizedLinkedIssueId = toSafeSingleLineText(pendingLinkedIssueId, 32);
+      const relatesTo = normalizedLinkedIssueId ? [normalizedLinkedIssueId] : [];
       const newIssue = {
         ...safeFormData,
         id: `PROJ-${nextIssueId}`,
@@ -1252,11 +1279,27 @@ const IssuesPage = ({ data, setData, t, language }) => {
         epicId: 'E-1',
         reporter: 'Admin',
         comments: [],
-        relatesTo: []
+        relatesTo
       };
+
+      const nextIssues = normalizedLinkedIssueId
+        ? data.issues.map((candidate) => {
+          if (candidate.id !== normalizedLinkedIssueId) {
+            return candidate;
+          }
+
+          const candidateRelations = Array.isArray(candidate.relatesTo) ? candidate.relatesTo : [];
+          if (candidateRelations.includes(newIssue.id)) {
+            return candidate;
+          }
+
+          return { ...candidate, relatesTo: [...candidateRelations, newIssue.id] };
+        })
+        : data.issues;
+
       setData({
         ...data,
-        issues: [...data.issues, newIssue],
+        issues: [...nextIssues, newIssue],
         lastId: nextIssueId
       });
     }
@@ -1375,6 +1418,9 @@ const IssuesPage = ({ data, setData, t, language }) => {
   const currentIssue = editingIssue
     ? data.issues.find((candidate) => candidate.id === editingIssue.id) || editingIssue
     : null;
+  const isCreateMode = issueMode === 'create';
+  const isViewMode = issueMode === 'view' && Boolean(currentIssue);
+  const isEditMode = issueMode === 'edit' && Boolean(currentIssue);
 
   useEffect(() => {
     if (viewMode !== 'list' || filteredIssues.length === 0) {
@@ -1425,7 +1471,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
     }
 
     // Открываем задачу из URL, когда переходим из диаграммы Ганта.
-    openModal(issueFromQuery, { keepIssueQuery: true });
+    openModal(issueFromQuery, { keepIssueQuery: true, mode: 'view' });
   }, [searchParams, data.issues, modalOpen, editingIssue?.id]);
 
   return (
@@ -1585,7 +1631,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
                     key={issue.id}
                     issue={issue}
                     t={t}
-                    onClick={() => openModal(issue)}
+                    onClick={() => openModal(issue, { mode: 'view' })}
                     onDragStart={(e) => {
                       handleDragStart(issue);
                       e.dataTransfer.setData('text/plain', issue.id);
@@ -1625,7 +1671,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
               return (
                 <div
                   key={issue.id}
-                  onClick={() => openModal(issue)}
+                  onClick={() => openModal(issue, { mode: 'view' })}
                   style={{
                     display: 'grid',
                     gridTemplateColumns: '80px 2fr 1fr 1fr 1fr 80px',
@@ -1692,19 +1738,89 @@ const IssuesPage = ({ data, setData, t, language }) => {
         </div>
       )}
 
-      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.editIssue} ${currentIssue.id}` : t.createIssue} width="1380px">
+      <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.viewIssue}: ${currentIssue.id}` : t.createIssue} width="1380px">
         <form onSubmit={handleFormSubmit}>
           <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
-            <IssueNotesSidebar
-              issue={currentIssue}
-              formData={formData}
-              t={t}
-              issues={data.issues}
-              relationCandidateId={relationCandidateId}
-              setRelationCandidateId={setRelationCandidateId}
-              onAddRelation={handleAddRelation}
-              onRemoveRelation={handleRemoveRelation}
-            />
+            {isCreateMode ? (
+              <IssueNotesSidebar
+                issue={currentIssue}
+                formData={formData}
+                t={t}
+                issues={data.issues}
+                relationCandidateId={relationCandidateId}
+                setRelationCandidateId={setRelationCandidateId}
+                onAddRelation={handleAddRelation}
+                onRemoveRelation={handleRemoveRelation}
+              />
+            ) : (
+              <aside style={{
+                background: '#F7F8FB',
+                border: '1px solid #E6E8EE',
+                borderRadius: '14px',
+                padding: '18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                alignSelf: 'start',
+                position: 'sticky',
+                top: '8px'
+              }}>
+                <h3 style={{ fontSize: '13px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#344563' }}>{t.issueDetails}</h3>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.type}</label>
+                  <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 34px 10px 10px', borderRadius: '8px' })}>
+                    <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
+                    <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
+                    <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.priority}</label>
+                  <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 34px 10px 10px', borderRadius: '8px' })}>
+                    <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
+                    <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
+                    <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.storyPoints}</label>
+                  <input type="number" min="0" value={formData.storyPoints} onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })} style={{ width: '100%', padding: '10px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.assignee}</label>
+                  <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => setFormData({ ...formData, assignee: e.target.value })} style={{ width: '100%', padding: '10px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                </div>
+                <div style={{ borderTop: '1px solid #E2E6ED', paddingTop: '12px' }}>
+                  <div style={{ fontSize: '12px', marginBottom: '8px', letterSpacing: '0.05em', textTransform: 'uppercase', color: '#6B778C' }}>{t.linkedIssues}</div>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                    <select
+                      value={relationCandidateId}
+                      onChange={(event) => setRelationCandidateId(event.target.value)}
+                      style={getSelectStyle({ width: '100%', padding: '8px 34px 8px 10px', borderRadius: '8px', fontSize: '13px' })}
+                    >
+                      <option value="">—</option>
+                      {data.issues.filter((candidate) => candidate.id !== currentIssue?.id && !(currentIssue?.relatesTo || []).includes(candidate.id)).map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>{candidate.id} · {candidate.title}</option>
+                      ))}
+                    </select>
+                    <button type="button" onClick={handleAddRelation} disabled={!relationCandidateId} style={{ border: '1px solid #C3CCD9', borderRadius: '8px', padding: '0 12px', fontSize: '13px', color: relationCandidateId ? '#172B4D' : '#9AA5B1', background: '#fff', cursor: relationCandidateId ? 'pointer' : 'not-allowed' }}>
+                      {t.addLink}
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {(currentIssue?.relatesTo || []).length === 0 ? (
+                      <span style={{ color: '#6B778C', fontSize: '13px' }}>{t.noRelatedIssues}</span>
+                    ) : (
+                      (currentIssue?.relatesTo || []).map((relatedId) => (
+                        <button key={relatedId} type="button" onClick={() => handleRemoveRelation(relatedId)} style={{ border: '1px solid #C3CCD9', background: '#fff', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>
+                          {relatedId} ×
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </aside>
+            )}
 
             <div style={{ border: '1px solid #DFE1E6', borderRadius: '14px', padding: '20px', background: '#FFFFFF' }}>
               <div style={{ marginBottom: '16px' }}>
@@ -1718,71 +1834,116 @@ const IssuesPage = ({ data, setData, t, language }) => {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.type}</label>
-                  <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
-                    <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
-                    <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
-                    <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.priority}</label>
-                  <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
-                    <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
-                    <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
-                    <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
-                  </select>
-                </div>
-              </div>
+              {isCreateMode ? (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.type}</label>
+                      <select value={formData.type} onChange={(e) => setFormData({ ...formData, type: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
+                        <option value="Task">{getTranslatedLabel(t.typeLabels, 'Task')}</option>
+                        <option value="Bug">{getTranslatedLabel(t.typeLabels, 'Bug')}</option>
+                        <option value="Story">{getTranslatedLabel(t.typeLabels, 'Story')}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.priority}</label>
+                      <select value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value })} style={getSelectStyle({ width: '100%', padding: '10px 40px 10px 12px', borderRadius: '8px' })}>
+                        <option value="Low">{getTranslatedLabel(t.priorityLabels, 'Low')}</option>
+                        <option value="Medium">{getTranslatedLabel(t.priorityLabels, 'Medium')}</option>
+                        <option value="High">{getTranslatedLabel(t.priorityLabels, 'High')}</option>
+                      </select>
+                    </div>
+                  </div>
+                </>
+              ) : null}
 
               <section style={{ marginBottom: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'baseline' }}>
                   <label style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.description}</label>
                   <span style={{ fontSize: '12px', color: '#6B778C' }}>{t.markdownHelp}</span>
                 </div>
-                <textarea
-                  rows="10"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '10px', fontFamily: 'inherit', minHeight: '220px', resize: 'vertical', marginBottom: '12px' }}
-                />
-                <div style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '12px', background: '#FBFCFF' }}>
-                  <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', color: '#6B778C' }}>{t.descriptionPreview}</div>
-                  <MarkdownPreview description={formData.description} t={t} />
-                </div>
+
+                {isViewMode ? (
+                  <div style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '12px', background: '#FBFCFF' }}>
+                    <MarkdownPreview description={formData.description} t={t} />
+                  </div>
+                ) : (
+                  <>
+                    <textarea
+                      rows="10"
+                      value={formData.description}
+                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                      style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '10px', fontFamily: 'inherit', minHeight: '220px', resize: 'vertical', marginBottom: '12px' }}
+                    />
+                    {(isCreateMode || showEditPreview) && (
+                      <div style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '12px', background: '#FBFCFF' }}>
+                        <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', color: '#6B778C' }}>{t.descriptionPreview}</div>
+                        <MarkdownPreview description={formData.description} t={t} />
+                      </div>
+                    )}
+                    {isEditMode && (
+                      <div style={{ marginTop: '8px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowEditPreview((prev) => !prev)}
+                          style={{ border: '1px solid #C3CCD9', borderRadius: '8px', padding: '8px 12px', background: '#fff', cursor: 'pointer' }}
+                        >
+                          {t.showPreview}
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
               </section>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.storyPoints}</label>
-                  <input type="number" min="0" value={formData.storyPoints} onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.dueDate}</label>
-                  <input type="date" value={formData.dueDate} onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
-                </div>
-              </div>
+              {isCreateMode ? (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.storyPoints}</label>
+                      <input type="number" min="0" value={formData.storyPoints} onChange={(e) => setFormData({ ...formData, storyPoints: parseInt(e.target.value, 10) || 0 })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.dueDate}</label>
+                      <input type="date" value={formData.dueDate} onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                    </div>
+                  </div>
 
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.assignee}</label>
-                <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => setFormData({ ...formData, assignee: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
-              </div>
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.assignee}</label>
+                    <input type="text" placeholder={t.assigneePlaceholder} value={formData.assignee} onChange={(e) => setFormData({ ...formData, assignee: e.target.value })} style={{ width: '100%', padding: '12px', border: '1px solid #C8D0DC', borderRadius: '8px', fontFamily: 'inherit' }} />
+                  </div>
+                </>
+              ) : null}
 
               <div style={{ textAlign: 'right' }}>
                 <button type="button" onClick={closeModal} style={{ border: '1px solid var(--border-color)', padding: '10px 20px', borderRadius: 'var(--radius-lg)', fontFamily: 'inherit', cursor: 'pointer', background: 'none', fontSize: '1rem', marginRight: '12px' }}>{t.cancel}</button>
-                <button type="submit" style={{ backgroundColor: 'var(--accent-color)', color: 'var(--text-color)', padding: '12px 24px', borderRadius: 'var(--radius-lg)', fontWeight: 500, border: 'none', fontFamily: 'inherit', cursor: 'pointer', fontSize: '1rem' }}>{t.saveIssue}</button>
+                {isViewMode ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => openModal(null, { linkedToIssueId: currentIssue.id })}
+                      style={{ border: '1px solid #C3CCD9', padding: '10px 20px', borderRadius: 'var(--radius-lg)', fontFamily: 'inherit', cursor: 'pointer', background: 'none', fontSize: '1rem', marginRight: '12px' }}
+                    >
+                      {t.createLinkedIssue}
+                    </button>
+                    <button type="button" onClick={() => setIssueMode('edit')} style={{ backgroundColor: 'var(--accent-color)', color: 'var(--text-color)', padding: '12px 24px', borderRadius: 'var(--radius-lg)', fontWeight: 500, border: 'none', fontFamily: 'inherit', cursor: 'pointer', fontSize: '1rem' }}>{t.editIssue}</button>
+                  </>
+                ) : (
+                  <button type="submit" style={{ backgroundColor: 'var(--accent-color)', color: 'var(--text-color)', padding: '12px 24px', borderRadius: 'var(--radius-lg)', fontWeight: 500, border: 'none', fontFamily: 'inherit', cursor: 'pointer', fontSize: '1rem' }}>{t.saveIssue}</button>
+                )}
               </div>
 
-              <IssueCommentsSection
-                issue={currentIssue}
-                commentDraft={commentDraft}
-                setCommentDraft={setCommentDraft}
-                onAddComment={handleAddComment}
-                t={t}
-                language={language}
-              />
+              {isViewMode && (
+                <IssueCommentsSection
+                  issue={currentIssue}
+                  commentDraft={commentDraft}
+                  setCommentDraft={setCommentDraft}
+                  onAddComment={handleAddComment}
+                  t={t}
+                  language={language}
+                />
+              )}
             </div>
           </div>
         </form>
@@ -2117,7 +2278,7 @@ const SprintPage = ({ data, setData, t, language }) => {
               <div>{issue.assignee}</div>
               <div>
                 <button
-                  onClick={() => openModal(issue)}
+                  onClick={() => openModal(issue, { mode: 'view' })}
                   style={{
                     border: '1px solid var(--border-color)',
                     padding: '4px 8px',
