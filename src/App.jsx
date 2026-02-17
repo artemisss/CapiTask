@@ -9,6 +9,7 @@ const DEFAULT_LANGUAGE = 'en';
 const ISSUE_TYPES = ['Task', 'Bug', 'Story'];
 const ISSUE_PRIORITIES = ['High', 'Medium', 'Low'];
 const ISSUE_STATUSES = ['To Do', 'In Progress', 'Done'];
+const RELATION_TYPES = ['related', 'blocks', 'subtask'];
 const ISSUE_TYPES_SET = new Set(ISSUE_TYPES);
 const ISSUE_PRIORITIES_SET = new Set(ISSUE_PRIORITIES);
 const ISSUE_STATUSES_SET = new Set(ISSUE_STATUSES);
@@ -41,6 +42,17 @@ const I18N = {
     descriptionPreview: 'Preview',
     linkedIssues: 'Linked',
     addLink: 'Add link',
+    linkIssue: 'Link issue',
+    selectIssue: 'Select issue',
+    relationType: 'Relation type',
+    linkTask: 'Link',
+    unlinkTask: 'Unlink issue',
+    openIssueCard: 'Open issue',
+    relationTypeLabels: {
+      related: 'Related',
+      blocks: 'Blocks',
+      subtask: 'Subtask'
+    },
     issueNotes: 'Issue notes',
     issueDetails: 'Issue details',
     markdownPreviewEmpty: 'Add a description to see Markdown preview',
@@ -131,6 +143,17 @@ const I18N = {
     descriptionPreview: 'Предпросмотр',
     linkedIssues: 'Связанные',
     addLink: 'Добавить связь',
+    linkIssue: 'Связать задачу',
+    selectIssue: 'Выберите задачу',
+    relationType: 'Тип связи',
+    linkTask: 'Связать',
+    unlinkTask: 'Открепить задачу',
+    openIssueCard: 'Посмотреть задачу',
+    relationTypeLabels: {
+      related: 'Связанная',
+      blocks: 'Блокирует',
+      subtask: 'Подзадача'
+    },
     issueNotes: 'Пометки по задаче',
     issueDetails: 'Детали задачи',
     markdownPreviewEmpty: 'Добавьте описание, чтобы увидеть предпросмотр Markdown',
@@ -373,16 +396,41 @@ const normalizeStoredComment = (comment, issueId, index) => {
   };
 };
 
+const normalizeRelationType = (value) => (
+  RELATION_TYPES.includes(value) ? value : 'related'
+);
+
+const normalizeRelationLinks = (issue, issueId) => {
+  const rawLinks = Array.isArray(issue?.relationLinks)
+    ? issue.relationLinks
+    : (Array.isArray(issue?.relatesTo)
+      ? issue.relatesTo.map((targetIssueId) => ({ targetIssueId, type: 'related' }))
+      : []);
+
+  const uniqueLinks = [];
+  const seenKeys = new Set();
+
+  rawLinks.forEach((rawLink) => {
+    const targetIssueId = toSafeSingleLineText(rawLink?.targetIssueId ?? rawLink, 32);
+    if (!targetIssueId || targetIssueId === issueId) {
+      return;
+    }
+
+    const type = normalizeRelationType(rawLink?.type);
+    const dedupeKey = `${targetIssueId}::${type}`;
+    if (seenKeys.has(dedupeKey)) {
+      return;
+    }
+
+    seenKeys.add(dedupeKey);
+    uniqueLinks.push({ targetIssueId, type });
+  });
+
+  return uniqueLinks.slice(0, 100);
+};
+
 const normalizeStoredIssue = (issue, index) => {
   const issueId = toSafeSingleLineText(issue?.id, 32) || `PROJ-${index + 1}`;
-  const relatedIds = Array.isArray(issue?.relatesTo) ? issue.relatesTo : [];
-  const safeRelatesTo = Array.from(
-    new Set(
-      relatedIds
-        .map((relatedId) => toSafeSingleLineText(relatedId, 32))
-        .filter((relatedId) => relatedId && relatedId !== issueId)
-    )
-  ).slice(0, 50);
   const comments = (Array.isArray(issue?.comments) ? issue.comments : [])
     .map((comment, commentIndex) => normalizeStoredComment(comment, issueId, commentIndex))
     .filter(Boolean)
@@ -402,7 +450,7 @@ const normalizeStoredIssue = (issue, index) => {
     sprintId: toSafeSingleLineText(issue?.sprintId, 24) || null,
     epicId: toSafeSingleLineText(issue?.epicId, 24) || null,
     comments,
-    relatesTo: safeRelatesTo
+    relationLinks: normalizeRelationLinks(issue, issueId)
   };
 };
 
@@ -600,7 +648,7 @@ const seedData = () => {
       sprintId: i < 10 ? 'S-1' : null,
       epicId: i % 2 === 0 ? 'E-1' : 'E-2',
       comments: [],
-      relatesTo: []
+      relationLinks: []
     });
   }
 
@@ -984,7 +1032,27 @@ const MarkdownPreview = ({ description, t }) => {
   );
 };
 
-const IssueNotesSidebar = ({ issue, formData, t, relationCandidateId, setRelationCandidateId, onAddRelation, onRemoveRelation, issues }) => {
+const getIssueRelationLinks = (issue) => {
+  if (!issue) {
+    return [];
+  }
+
+  if (Array.isArray(issue.relationLinks)) {
+    return issue.relationLinks
+      .map((link) => ({
+        targetIssueId: toSafeSingleLineText(link?.targetIssueId, 32),
+        type: normalizeRelationType(link?.type)
+      }))
+      .filter((link) => link.targetIssueId);
+  }
+
+  const legacyRelations = Array.isArray(issue.relatesTo) ? issue.relatesTo : [];
+  return legacyRelations
+    .map((targetIssueId) => ({ targetIssueId: toSafeSingleLineText(targetIssueId, 32), type: 'related' }))
+    .filter((link) => link.targetIssueId);
+};
+
+const IssueRelationSidebar = ({ issue, formData, t, issues, relationLinks, onOpenLinkDialog, onOpenRelationPreview }) => {
   if (!issue) {
     return (
       <aside style={{
@@ -1000,12 +1068,12 @@ const IssueNotesSidebar = ({ issue, formData, t, relationCandidateId, setRelatio
     );
   }
 
-  const relatedIssueIds = Array.isArray(issue.relatesTo) ? issue.relatesTo : [];
-  const relatedIssues = relatedIssueIds
-    .map((issueId) => issues.find((candidate) => candidate.id === issueId))
-    .filter(Boolean);
-
-  const relationCandidates = issues.filter((candidate) => candidate.id !== issue.id && !relatedIssueIds.includes(candidate.id));
+  const linkedIssues = relationLinks
+    .map((relationLink) => ({
+      ...relationLink,
+      issue: issues.find((candidate) => candidate.id === relationLink.targetIssueId)
+    }))
+    .filter((relationLink) => relationLink.issue);
 
   return (
     <aside style={{
@@ -1023,7 +1091,7 @@ const IssueNotesSidebar = ({ issue, formData, t, relationCandidateId, setRelatio
       <h3 style={{ fontSize: '13px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#344563' }}>{t.issueNotes}</h3>
 
       <div style={{ display: 'grid', gap: '8px' }}>
-        {[ 
+        {[
           [t.type, getTranslatedLabel(t.typeLabels, formData.type)],
           [t.priority, getTranslatedLabel(t.priorityLabels, formData.priority)],
           [t.storyPoints, String(formData.storyPoints)],
@@ -1038,55 +1106,32 @@ const IssueNotesSidebar = ({ issue, formData, t, relationCandidateId, setRelatio
       </div>
 
       <div style={{ borderTop: '1px solid #E2E6ED', paddingTop: '14px' }}>
-        <div style={{ fontSize: '12px', marginBottom: '8px', letterSpacing: '0.05em', textTransform: 'uppercase', color: '#6B778C' }}>{t.linkedIssues}</div>
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-          <select
-            value={relationCandidateId}
-            onChange={(event) => setRelationCandidateId(event.target.value)}
-            style={getSelectStyle({ width: '100%', padding: '8px 34px 8px 10px', borderRadius: '8px', fontSize: '13px' })}
-          >
-            <option value="">—</option>
-            {relationCandidates.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>{candidate.id} · {candidate.title}</option>
-            ))}
-          </select>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+          <div style={{ fontSize: '12px', letterSpacing: '0.05em', textTransform: 'uppercase', color: '#6B778C' }}>{t.linkedIssues}</div>
           <button
             type="button"
-            onClick={onAddRelation}
-            disabled={!relationCandidateId}
-            style={{
-              border: '1px solid #C3CCD9',
-              borderRadius: '8px',
-              padding: '0 12px',
-              fontSize: '13px',
-              color: relationCandidateId ? '#172B4D' : '#9AA5B1',
-              background: '#fff',
-              cursor: relationCandidateId ? 'pointer' : 'not-allowed'
-            }}
+            onClick={onOpenLinkDialog}
+            style={{ border: '1px solid #C3CCD9', borderRadius: '8px', width: '28px', height: '28px', fontSize: '18px', lineHeight: 1, color: '#172B4D', background: '#fff', cursor: 'pointer' }}
+            title={t.addLink}
+            aria-label={t.addLink}
           >
-            {t.addLink}
+            +
           </button>
         </div>
+
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-          {relatedIssues.length === 0 ? (
+          {linkedIssues.length === 0 ? (
             <span style={{ color: '#6B778C', fontSize: '13px' }}>{t.noRelatedIssues}</span>
           ) : (
-            relatedIssues.map((relatedIssue) => (
+            linkedIssues.map((relationLink) => (
               <button
-                key={relatedIssue.id}
+                key={`${issue.id}-${relationLink.targetIssueId}-${relationLink.type}`}
                 type="button"
-                onClick={() => onRemoveRelation(relatedIssue.id)}
-                style={{
-                  border: '1px solid #C3CCD9',
-                  background: '#fff',
-                  borderRadius: '999px',
-                  padding: '6px 10px',
-                  fontSize: '12px',
-                  color: '#344563'
-                }}
-                title={relatedIssue.title}
+                onClick={() => onOpenRelationPreview(relationLink)}
+                style={{ border: '1px solid #C3CCD9', background: '#fff', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', color: '#344563', cursor: 'pointer' }}
+                title={relationLink.issue.title}
               >
-                {relatedIssue.id} ×
+                {relationLink.issue.id} · {getTranslatedLabel(t.relationTypeLabels, relationLink.type)}
               </button>
             ))
           )}
@@ -1168,8 +1213,11 @@ const IssuesPage = ({ data, setData, t, language }) => {
   const [draggedItem, setDraggedItem] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
   const [showCapybaraEasterEgg, setShowCapybaraEasterEgg] = useState(false);
-  const [relationCandidateId, setRelationCandidateId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [relationCandidateId, setRelationCandidateId] = useState('');
+  const [relationCandidateType, setRelationCandidateType] = useState('related');
+  const [relationPreview, setRelationPreview] = useState(null);
   const [issueMode, setIssueMode] = useState('create');
   const [showEditPreview, setShowEditPreview] = useState(false);
   const [pendingLinkedIssueId, setPendingLinkedIssueId] = useState('');
@@ -1229,6 +1277,9 @@ const IssuesPage = ({ data, setData, t, language }) => {
     }
 
     setRelationCandidateId('');
+    setRelationCandidateType('related');
+    setRelationPreview(null);
+    setLinkDialogOpen(false);
     setCommentDraft('');
     setShowEditPreview(false);
 
@@ -1272,6 +1323,9 @@ const IssuesPage = ({ data, setData, t, language }) => {
     setShowEditPreview(false);
     setPendingLinkedIssueId('');
     setRelationCandidateId('');
+    setRelationCandidateType('related');
+    setRelationPreview(null);
+    setLinkDialogOpen(false);
     setCommentDraft('');
     clearIssueQueryParam();
   };
@@ -1288,7 +1342,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
     } else {
       const nextIssueId = clampInteger(data.lastId, 0, 999999, 0) + 1;
       const normalizedLinkedIssueId = toSafeSingleLineText(pendingLinkedIssueId, 32);
-      const relatesTo = normalizedLinkedIssueId ? [normalizedLinkedIssueId] : [];
+      const relationLinks = normalizedLinkedIssueId ? [{ targetIssueId: normalizedLinkedIssueId, type: 'related' }] : [];
       const newIssue = {
         ...safeFormData,
         id: `PROJ-${nextIssueId}`,
@@ -1297,7 +1351,7 @@ const IssuesPage = ({ data, setData, t, language }) => {
         epicId: 'E-1',
         reporter: 'Admin',
         comments: [],
-        relatesTo
+        relationLinks
       };
 
       const nextIssues = normalizedLinkedIssueId
@@ -1306,12 +1360,12 @@ const IssuesPage = ({ data, setData, t, language }) => {
             return candidate;
           }
 
-          const candidateRelations = Array.isArray(candidate.relatesTo) ? candidate.relatesTo : [];
-          if (candidateRelations.includes(newIssue.id)) {
+          const candidateRelations = getIssueRelationLinks(candidate);
+          if (candidateRelations.some((relationLink) => relationLink.targetIssueId === newIssue.id)) {
             return candidate;
           }
 
-          return { ...candidate, relatesTo: [...candidateRelations, newIssue.id] };
+          return { ...candidate, relationLinks: [...candidateRelations, { targetIssueId: newIssue.id, type: 'related' }] };
         })
         : data.issues;
 
@@ -1345,35 +1399,39 @@ const IssuesPage = ({ data, setData, t, language }) => {
     setDragOverColumn(null);
   };
 
-  const updateIssueRelations = (targetIssueId, shouldLink) => {
+  const updateIssueRelations = (targetIssueId, relationType, shouldLink) => {
     if (!currentIssue || !targetIssueId || targetIssueId === currentIssue.id) {
       return;
     }
 
+    const safeRelationType = normalizeRelationType(relationType);
+
     setData((previousData) => {
       let hasChanges = false;
       const updatedIssues = previousData.issues.map((candidate) => {
-        const candidateRelations = Array.isArray(candidate.relatesTo) ? candidate.relatesTo : [];
+        const candidateRelations = getIssueRelationLinks(candidate);
 
         if (candidate.id === currentIssue.id) {
-          if (shouldLink && !candidateRelations.includes(targetIssueId)) {
+          const hasCurrentLink = candidateRelations.some((relationLink) => relationLink.targetIssueId === targetIssueId && relationLink.type === safeRelationType);
+          if (shouldLink && !hasCurrentLink) {
             hasChanges = true;
-            return { ...candidate, relatesTo: [...candidateRelations, targetIssueId] };
+            return { ...candidate, relationLinks: [...candidateRelations, { targetIssueId, type: safeRelationType }] };
           }
-          if (!shouldLink && candidateRelations.includes(targetIssueId)) {
+          if (!shouldLink && hasCurrentLink) {
             hasChanges = true;
-            return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== targetIssueId) };
+            return { ...candidate, relationLinks: candidateRelations.filter((relationLink) => !(relationLink.targetIssueId === targetIssueId && relationLink.type === safeRelationType)) };
           }
         }
 
         if (candidate.id === targetIssueId) {
-          if (shouldLink && !candidateRelations.includes(currentIssue.id)) {
+          const hasBackLink = candidateRelations.some((relationLink) => relationLink.targetIssueId === currentIssue.id && relationLink.type === safeRelationType);
+          if (shouldLink && !hasBackLink) {
             hasChanges = true;
-            return { ...candidate, relatesTo: [...candidateRelations, currentIssue.id] };
+            return { ...candidate, relationLinks: [...candidateRelations, { targetIssueId: currentIssue.id, type: safeRelationType }] };
           }
-          if (!shouldLink && candidateRelations.includes(currentIssue.id)) {
+          if (!shouldLink && hasBackLink) {
             hasChanges = true;
-            return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== currentIssue.id) };
+            return { ...candidate, relationLinks: candidateRelations.filter((relationLink) => !(relationLink.targetIssueId === currentIssue.id && relationLink.type === safeRelationType)) };
           }
         }
 
@@ -1388,12 +1446,14 @@ const IssuesPage = ({ data, setData, t, language }) => {
     if (!relationCandidateId) {
       return;
     }
-    updateIssueRelations(relationCandidateId, true);
+    updateIssueRelations(relationCandidateId, relationCandidateType, true);
     setRelationCandidateId('');
+    setRelationCandidateType('related');
+    setLinkDialogOpen(false);
   };
 
-  const handleRemoveRelation = (targetIssueId) => {
-    updateIssueRelations(targetIssueId, false);
+  const handleRemoveRelation = (targetIssueId, relationType) => {
+    updateIssueRelations(targetIssueId, relationType, false);
   };
 
   const handleIssueDetailChange = (fieldName, fieldValue) => {
@@ -1458,6 +1518,11 @@ const IssuesPage = ({ data, setData, t, language }) => {
   const isCreateMode = issueMode === 'create';
   const isViewMode = issueMode === 'view' && Boolean(currentIssue);
   const isEditMode = issueMode === 'edit' && Boolean(currentIssue);
+  const currentRelationLinks = getIssueRelationLinks(currentIssue);
+  const relationCandidates = data.issues.filter((candidate) => (
+    candidate.id !== currentIssue?.id
+    && !currentRelationLinks.some((relationLink) => relationLink.targetIssueId === candidate.id && relationLink.type === relationCandidateType)
+  ));
 
   useEffect(() => {
     if (viewMode !== 'list' || filteredIssues.length === 0) {
@@ -1779,15 +1844,14 @@ const IssuesPage = ({ data, setData, t, language }) => {
         <form onSubmit={handleFormSubmit}>
           <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
             {isCreateMode ? (
-              <IssueNotesSidebar
+              <IssueRelationSidebar
                 issue={currentIssue}
                 formData={formData}
                 t={t}
                 issues={data.issues}
-                relationCandidateId={relationCandidateId}
-                setRelationCandidateId={setRelationCandidateId}
-                onAddRelation={handleAddRelation}
-                onRemoveRelation={handleRemoveRelation}
+                relationLinks={currentRelationLinks}
+                onOpenLinkDialog={() => setLinkDialogOpen(true)}
+                onOpenRelationPreview={setRelationPreview}
               />
             ) : (
               <aside style={{
@@ -1832,34 +1896,21 @@ const IssuesPage = ({ data, setData, t, language }) => {
                     <div style={{ fontSize: '12px', letterSpacing: '0.05em', textTransform: 'uppercase', color: '#6B778C' }}>{t.linkedIssues}</div>
                     <button
                       type="button"
-                      onClick={handleAddRelation}
-                      disabled={!relationCandidateId}
-                      style={{ border: '1px solid #C3CCD9', borderRadius: '8px', width: '28px', height: '28px', fontSize: '18px', lineHeight: 1, color: relationCandidateId ? '#172B4D' : '#9AA5B1', background: '#fff', cursor: relationCandidateId ? 'pointer' : 'not-allowed' }}
+                      onClick={() => setLinkDialogOpen(true)}
+                      style={{ border: '1px solid #C3CCD9', borderRadius: '8px', width: '28px', height: '28px', fontSize: '18px', lineHeight: 1, color: '#172B4D', background: '#fff', cursor: 'pointer' }}
                       title={t.addLink}
                       aria-label={t.addLink}
                     >
                       +
                     </button>
                   </div>
-                  <div style={{ marginBottom: '10px' }}>
-                    <select
-                      value={relationCandidateId}
-                      onChange={(event) => setRelationCandidateId(event.target.value)}
-                      style={getSelectStyle({ width: '100%', padding: '8px 34px 8px 10px', borderRadius: '8px', fontSize: '13px' })}
-                    >
-                      <option value="">{t.add}</option>
-                      {data.issues.filter((candidate) => candidate.id !== currentIssue?.id && !(currentIssue?.relatesTo || []).includes(candidate.id)).map((candidate) => (
-                        <option key={candidate.id} value={candidate.id}>{candidate.id} · {candidate.title}</option>
-                      ))}
-                    </select>
-                  </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {(currentIssue?.relatesTo || []).length === 0 ? (
+                    {currentRelationLinks.length === 0 ? (
                       <span style={{ color: '#6B778C', fontSize: '13px' }}>{t.noLinks}</span>
                     ) : (
-                      (currentIssue?.relatesTo || []).slice(0, 1).map((relatedId) => (
-                        <button key={relatedId} type="button" onClick={() => handleRemoveRelation(relatedId)} style={{ border: '1px solid #C3CCD9', background: '#fff', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>
-                          {relatedId} ×
+                      currentRelationLinks.map((relationLink) => (
+                        <button key={`${relationLink.targetIssueId}-${relationLink.type}`} type="button" onClick={() => setRelationPreview(relationLink)} style={{ border: '1px solid #C3CCD9', background: '#fff', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>
+                          {relationLink.targetIssueId} · {getTranslatedLabel(t.relationTypeLabels, relationLink.type)}
                         </button>
                       ))
                     )}
@@ -1999,6 +2050,52 @@ const IssuesPage = ({ data, setData, t, language }) => {
           </div>
         </form>
       </Modal>
+
+      <Modal isOpen={linkDialogOpen && Boolean(currentIssue)} onClose={() => setLinkDialogOpen(false)} title={t.linkIssue} width="460px">
+        <div style={{ display: 'grid', gap: '12px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t.selectIssue}</label>
+            <select value={relationCandidateId} onChange={(event) => setRelationCandidateId(event.target.value)} style={getSelectStyle({ width: '100%' })}>
+              <option value="">—</option>
+              {relationCandidates.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>{candidate.id} · {candidate.title}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t.relationType}</label>
+            <select value={relationCandidateType} onChange={(event) => setRelationCandidateType(event.target.value)} style={getSelectStyle({ width: '100%' })}>
+              {RELATION_TYPES.map((relationType) => (
+                <option key={relationType} value={relationType}>{getTranslatedLabel(t.relationTypeLabels, relationType)}</option>
+              ))}
+            </select>
+          </div>
+          <button type="button" onClick={handleAddRelation} disabled={!relationCandidateId} style={{ border: 'none', borderRadius: '10px', padding: '10px 12px', background: relationCandidateId ? '#111' : '#D7DCE3', color: '#fff', cursor: relationCandidateId ? 'pointer' : 'not-allowed' }}>
+            {t.linkTask}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={Boolean(relationPreview && currentIssue)} onClose={() => setRelationPreview(null)} title={t.linkedIssues} width="560px">
+        {relationPreview && currentIssue && (() => {
+          const previewIssue = data.issues.find((candidate) => candidate.id === relationPreview.targetIssueId);
+          if (!previewIssue) {
+            return <div>{t.noMatchingIssues}</div>;
+          }
+
+          return (
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <div style={{ fontSize: '12px', color: '#6B778C' }}>{getTranslatedLabel(t.relationTypeLabels, relationPreview.type)}</div>
+              <div style={{ fontSize: '20px', fontWeight: 700 }}>{previewIssue.title}</div>
+              <div style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '10px' }}>{previewIssue.description || '—'}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                <button type="button" onClick={() => window.open(`/?issue=${encodeURIComponent(previewIssue.id)}`, '_self')} style={{ border: '1px solid #C3CCD9', borderRadius: '8px', padding: '8px 12px', background: '#fff' }}>{t.openIssueCard}</button>
+                <button type="button" onClick={() => { handleRemoveRelation(previewIssue.id, relationPreview.type); setRelationPreview(null); }} style={{ border: 'none', borderRadius: '8px', padding: '8px 12px', background: '#D92D20', color: '#fff' }}>{t.unlinkTask}</button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </main>
   );
 };
@@ -2008,8 +2105,11 @@ const SprintPage = ({ data, setData, t, language }) => {
   const [sortField, setSortField] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingIssue, setEditingIssue] = useState(null);
-  const [relationCandidateId, setRelationCandidateId] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [relationCandidateId, setRelationCandidateId] = useState('');
+  const [relationCandidateType, setRelationCandidateType] = useState('related');
+  const [relationPreview, setRelationPreview] = useState(null);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -2045,6 +2145,9 @@ const SprintPage = ({ data, setData, t, language }) => {
 
   const openModal = (issue) => {
     setRelationCandidateId('');
+    setRelationCandidateType('related');
+    setRelationPreview(null);
+    setLinkDialogOpen(false);
     setCommentDraft('');
     setEditingIssue(issue);
     setFormData({
@@ -2063,6 +2166,9 @@ const SprintPage = ({ data, setData, t, language }) => {
     setModalOpen(false);
     setEditingIssue(null);
     setRelationCandidateId('');
+    setRelationCandidateType('related');
+    setRelationPreview(null);
+    setLinkDialogOpen(false);
     setCommentDraft('');
   };
 
@@ -2078,35 +2184,39 @@ const SprintPage = ({ data, setData, t, language }) => {
     closeModal();
   };
 
-  const updateIssueRelations = (targetIssueId, shouldLink) => {
+  const updateIssueRelations = (targetIssueId, relationType, shouldLink) => {
     if (!currentIssue || !targetIssueId || targetIssueId === currentIssue.id) {
       return;
     }
 
+    const safeRelationType = normalizeRelationType(relationType);
+
     setData((previousData) => {
       let hasChanges = false;
       const updatedIssues = previousData.issues.map((candidate) => {
-        const candidateRelations = Array.isArray(candidate.relatesTo) ? candidate.relatesTo : [];
+        const candidateRelations = getIssueRelationLinks(candidate);
 
         if (candidate.id === currentIssue.id) {
-          if (shouldLink && !candidateRelations.includes(targetIssueId)) {
+          const hasCurrentLink = candidateRelations.some((relationLink) => relationLink.targetIssueId === targetIssueId && relationLink.type === safeRelationType);
+          if (shouldLink && !hasCurrentLink) {
             hasChanges = true;
-            return { ...candidate, relatesTo: [...candidateRelations, targetIssueId] };
+            return { ...candidate, relationLinks: [...candidateRelations, { targetIssueId, type: safeRelationType }] };
           }
-          if (!shouldLink && candidateRelations.includes(targetIssueId)) {
+          if (!shouldLink && hasCurrentLink) {
             hasChanges = true;
-            return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== targetIssueId) };
+            return { ...candidate, relationLinks: candidateRelations.filter((relationLink) => !(relationLink.targetIssueId === targetIssueId && relationLink.type === safeRelationType)) };
           }
         }
 
         if (candidate.id === targetIssueId) {
-          if (shouldLink && !candidateRelations.includes(currentIssue.id)) {
+          const hasBackLink = candidateRelations.some((relationLink) => relationLink.targetIssueId === currentIssue.id && relationLink.type === safeRelationType);
+          if (shouldLink && !hasBackLink) {
             hasChanges = true;
-            return { ...candidate, relatesTo: [...candidateRelations, currentIssue.id] };
+            return { ...candidate, relationLinks: [...candidateRelations, { targetIssueId: currentIssue.id, type: safeRelationType }] };
           }
-          if (!shouldLink && candidateRelations.includes(currentIssue.id)) {
+          if (!shouldLink && hasBackLink) {
             hasChanges = true;
-            return { ...candidate, relatesTo: candidateRelations.filter((id) => id !== currentIssue.id) };
+            return { ...candidate, relationLinks: candidateRelations.filter((relationLink) => !(relationLink.targetIssueId === currentIssue.id && relationLink.type === safeRelationType)) };
           }
         }
 
@@ -2121,12 +2231,14 @@ const SprintPage = ({ data, setData, t, language }) => {
     if (!relationCandidateId) {
       return;
     }
-    updateIssueRelations(relationCandidateId, true);
+    updateIssueRelations(relationCandidateId, relationCandidateType, true);
     setRelationCandidateId('');
+    setRelationCandidateType('related');
+    setLinkDialogOpen(false);
   };
 
-  const handleRemoveRelation = (targetIssueId) => {
-    updateIssueRelations(targetIssueId, false);
+  const handleRemoveRelation = (targetIssueId, relationType) => {
+    updateIssueRelations(targetIssueId, relationType, false);
   };
 
   const handleAddComment = () => {
@@ -2193,6 +2305,11 @@ const SprintPage = ({ data, setData, t, language }) => {
   const currentIssue = editingIssue
     ? data.issues.find((candidate) => candidate.id === editingIssue.id) || editingIssue
     : null;
+  const currentRelationLinks = getIssueRelationLinks(currentIssue);
+  const relationCandidates = data.issues.filter((candidate) => (
+    candidate.id !== currentIssue?.id
+    && !currentRelationLinks.some((relationLink) => relationLink.targetIssueId === candidate.id && relationLink.type === relationCandidateType)
+  ));
 
   return (
     <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -2351,15 +2468,14 @@ const SprintPage = ({ data, setData, t, language }) => {
       <Modal isOpen={modalOpen} onClose={closeModal} title={currentIssue ? `${t.editIssue} ${currentIssue.id}` : t.createIssue} width="1380px">
         <form onSubmit={handleFormSubmit}>
           <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
-            <IssueNotesSidebar
+            <IssueRelationSidebar
               issue={currentIssue}
               formData={formData}
               t={t}
               issues={data.issues}
-              relationCandidateId={relationCandidateId}
-              setRelationCandidateId={setRelationCandidateId}
-              onAddRelation={handleAddRelation}
-              onRemoveRelation={handleRemoveRelation}
+              relationLinks={currentRelationLinks}
+              onOpenLinkDialog={() => setLinkDialogOpen(true)}
+              onOpenRelationPreview={setRelationPreview}
             />
 
             <div style={{ border: '1px solid #DFE1E6', borderRadius: '14px', padding: '20px', background: '#FFFFFF' }}>
@@ -2432,6 +2548,52 @@ const SprintPage = ({ data, setData, t, language }) => {
           </div>
         </form>
       </Modal>
+
+      <Modal isOpen={linkDialogOpen && Boolean(currentIssue)} onClose={() => setLinkDialogOpen(false)} title={t.linkIssue} width="460px">
+        <div style={{ display: 'grid', gap: '12px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t.selectIssue}</label>
+            <select value={relationCandidateId} onChange={(event) => setRelationCandidateId(event.target.value)} style={getSelectStyle({ width: '100%' })}>
+              <option value="">—</option>
+              {relationCandidates.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>{candidate.id} · {candidate.title}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t.relationType}</label>
+            <select value={relationCandidateType} onChange={(event) => setRelationCandidateType(event.target.value)} style={getSelectStyle({ width: '100%' })}>
+              {RELATION_TYPES.map((relationType) => (
+                <option key={relationType} value={relationType}>{getTranslatedLabel(t.relationTypeLabels, relationType)}</option>
+              ))}
+            </select>
+          </div>
+          <button type="button" onClick={handleAddRelation} disabled={!relationCandidateId} style={{ border: 'none', borderRadius: '10px', padding: '10px 12px', background: relationCandidateId ? '#111' : '#D7DCE3', color: '#fff', cursor: relationCandidateId ? 'pointer' : 'not-allowed' }}>
+            {t.linkTask}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={Boolean(relationPreview && currentIssue)} onClose={() => setRelationPreview(null)} title={t.linkedIssues} width="560px">
+        {relationPreview && currentIssue && (() => {
+          const previewIssue = data.issues.find((candidate) => candidate.id === relationPreview.targetIssueId);
+          if (!previewIssue) {
+            return <div>{t.noMatchingIssues}</div>;
+          }
+
+          return (
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <div style={{ fontSize: '12px', color: '#6B778C' }}>{getTranslatedLabel(t.relationTypeLabels, relationPreview.type)}</div>
+              <div style={{ fontSize: '20px', fontWeight: 700 }}>{previewIssue.title}</div>
+              <div style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '10px' }}>{previewIssue.description || '—'}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                <button type="button" onClick={() => window.open(`/?issue=${encodeURIComponent(previewIssue.id)}`, '_self')} style={{ border: '1px solid #C3CCD9', borderRadius: '8px', padding: '8px 12px', background: '#fff' }}>{t.openIssueCard}</button>
+                <button type="button" onClick={() => { handleRemoveRelation(previewIssue.id, relationPreview.type); setRelationPreview(null); }} style={{ border: 'none', borderRadius: '8px', padding: '8px 12px', background: '#D92D20', color: '#fff' }}>{t.unlinkTask}</button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </main>
   );
 };
@@ -2441,11 +2603,20 @@ const GanttPage = ({ data, setData, t, language }) => {
   const [showRelations, setShowRelations] = useState(false);
   const [openedIssueId, setOpenedIssueId] = useState(null);
 
+  const [ganttIssueMode, setGanttIssueMode] = useState('view');
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [relationCandidateId, setRelationCandidateId] = useState('');
+  const [relationCandidateType, setRelationCandidateType] = useState('related');
+  const [relationPreview, setRelationPreview] = useState(null);
   const activeIssues = data.issues.filter((issue) => issue.status !== 'Done');
   const openedIssue = openedIssueId
     ? data.issues.find((issue) => issue.id === openedIssueId) ?? null
     : null;
-  const [ganttIssueMode, setGanttIssueMode] = useState('view');
+  const openedIssueRelationLinks = getIssueRelationLinks(openedIssue);
+  const relationCandidates = data.issues.filter((candidate) => (
+    candidate.id !== openedIssue?.id
+    && !openedIssueRelationLinks.some((relationLink) => relationLink.targetIssueId === candidate.id && relationLink.type === relationCandidateType)
+  ));
   const [ganttFormData, setGanttFormData] = useState({
     title: '',
     description: '',
@@ -2596,8 +2767,9 @@ const GanttPage = ({ data, setData, t, language }) => {
           return;
         }
 
-        const relatedIssueIds = Array.isArray(issue.relatesTo) ? issue.relatesTo : [];
-        relatedIssueIds.forEach((targetIssueId) => {
+        const relatedIssueLinks = getIssueRelationLinks(issue);
+        relatedIssueLinks.forEach((relationLink) => {
+          const targetIssueId = relationLink.targetIssueId;
           if (!targetIssueId || targetIssueId === issue.id) {
             return;
           }
@@ -2649,6 +2821,54 @@ const GanttPage = ({ data, setData, t, language }) => {
     }));
     setGanttIssueMode('view');
   };
+
+  const updateIssueRelations = (targetIssueId, relationType, shouldLink) => {
+    if (!openedIssue || !targetIssueId || targetIssueId === openedIssue.id) {
+      return;
+    }
+
+    const safeRelationType = normalizeRelationType(relationType);
+
+    setData((previousData) => ({
+      ...previousData,
+      issues: previousData.issues.map((candidate) => {
+        const candidateRelations = getIssueRelationLinks(candidate);
+
+        if (candidate.id === openedIssue.id) {
+          const hasLink = candidateRelations.some((relationLink) => relationLink.targetIssueId === targetIssueId && relationLink.type === safeRelationType);
+          if (shouldLink && !hasLink) {
+            return { ...candidate, relationLinks: [...candidateRelations, { targetIssueId, type: safeRelationType }] };
+          }
+          if (!shouldLink && hasLink) {
+            return { ...candidate, relationLinks: candidateRelations.filter((relationLink) => !(relationLink.targetIssueId === targetIssueId && relationLink.type === safeRelationType)) };
+          }
+        }
+
+        if (candidate.id === targetIssueId) {
+          const hasBackLink = candidateRelations.some((relationLink) => relationLink.targetIssueId === openedIssue.id && relationLink.type === safeRelationType);
+          if (shouldLink && !hasBackLink) {
+            return { ...candidate, relationLinks: [...candidateRelations, { targetIssueId: openedIssue.id, type: safeRelationType }] };
+          }
+          if (!shouldLink && hasBackLink) {
+            return { ...candidate, relationLinks: candidateRelations.filter((relationLink) => !(relationLink.targetIssueId === openedIssue.id && relationLink.type === safeRelationType)) };
+          }
+        }
+
+        return candidate;
+      })
+    }));
+  };
+
+  const handleAddRelation = () => {
+    if (!relationCandidateId) {
+      return;
+    }
+    updateIssueRelations(relationCandidateId, relationCandidateType, true);
+    setRelationCandidateId('');
+    setRelationCandidateType('related');
+    setLinkDialogOpen(false);
+  };
+
 
   return (
     <main style={{ padding: '40px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -2986,6 +3206,24 @@ const GanttPage = ({ data, setData, t, language }) => {
               )}
             </div>
 
+            <div style={{ border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <div style={{ fontSize: '11px', color: '#666' }}>{t.linkedIssues}</div>
+                <button type="button" onClick={() => setLinkDialogOpen(true)} style={{ border: '1px solid #C3CCD9', borderRadius: '8px', width: '28px', height: '28px', background: '#fff' }}>+</button>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {openedIssueRelationLinks.length === 0 ? (
+                  <span style={{ color: '#6B778C', fontSize: '13px' }}>{t.noLinks}</span>
+                ) : (
+                  openedIssueRelationLinks.map((relationLink) => (
+                    <button key={`${relationLink.targetIssueId}-${relationLink.type}`} type="button" onClick={() => setRelationPreview(relationLink)} style={{ border: '1px solid #C3CCD9', background: '#fff', borderRadius: '999px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>
+                      {relationLink.targetIssueId} · {getTranslatedLabel(t.relationTypeLabels, relationLink.type)}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button
                 type="button"
@@ -3022,6 +3260,52 @@ const GanttPage = ({ data, setData, t, language }) => {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal isOpen={linkDialogOpen && Boolean(openedIssue)} onClose={() => setLinkDialogOpen(false)} title={t.linkIssue} width="460px">
+        <div style={{ display: 'grid', gap: '12px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t.selectIssue}</label>
+            <select value={relationCandidateId} onChange={(event) => setRelationCandidateId(event.target.value)} style={getSelectStyle({ width: '100%' })}>
+              <option value="">—</option>
+              {relationCandidates.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>{candidate.id} · {candidate.title}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '6px', fontSize: '12px' }}>{t.relationType}</label>
+            <select value={relationCandidateType} onChange={(event) => setRelationCandidateType(event.target.value)} style={getSelectStyle({ width: '100%' })}>
+              {RELATION_TYPES.map((relationType) => (
+                <option key={relationType} value={relationType}>{getTranslatedLabel(t.relationTypeLabels, relationType)}</option>
+              ))}
+            </select>
+          </div>
+          <button type="button" onClick={handleAddRelation} disabled={!relationCandidateId} style={{ border: 'none', borderRadius: '10px', padding: '10px 12px', background: relationCandidateId ? '#111' : '#D7DCE3', color: '#fff', cursor: relationCandidateId ? 'pointer' : 'not-allowed' }}>
+            {t.linkTask}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={Boolean(relationPreview && openedIssue)} onClose={() => setRelationPreview(null)} title={t.linkedIssues} width="560px">
+        {relationPreview && openedIssue && (() => {
+          const previewIssue = data.issues.find((candidate) => candidate.id === relationPreview.targetIssueId);
+          if (!previewIssue) {
+            return <div>{t.noMatchingIssues}</div>;
+          }
+
+          return (
+            <div style={{ display: 'grid', gap: '12px' }}>
+              <div style={{ fontSize: '12px', color: '#6B778C' }}>{getTranslatedLabel(t.relationTypeLabels, relationPreview.type)}</div>
+              <div style={{ fontSize: '20px', fontWeight: 700 }}>{previewIssue.title}</div>
+              <div style={{ border: '1px solid #E2E6ED', borderRadius: '10px', padding: '10px' }}>{previewIssue.description || '—'}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+                <button type="button" onClick={() => window.open(`/?issue=${encodeURIComponent(previewIssue.id)}`, '_self')} style={{ border: '1px solid #C3CCD9', borderRadius: '8px', padding: '8px 12px', background: '#fff' }}>{t.openIssueCard}</button>
+                <button type="button" onClick={() => { updateIssueRelations(previewIssue.id, relationPreview.type, false); setRelationPreview(null); }} style={{ border: 'none', borderRadius: '8px', padding: '8px 12px', background: '#D92D20', color: '#fff' }}>{t.unlinkTask}</button>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
     </main>
   );
