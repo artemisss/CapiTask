@@ -6,11 +6,16 @@
 
 body {
   font-family: var(--font-main, 'Helvetica Neue', Helvetica, Arial, sans-serif);
-  background-color: var(--bg-color, #ffffff);
-  color: var(--text-color, #000000);
+  background:
+    radial-gradient(circle at 12% 8%, rgba(130, 197, 255, 0.45), transparent 36%),
+    radial-gradient(circle at 84% 14%, rgba(190, 146, 255, 0.34), transparent 42%),
+    radial-gradient(circle at 38% 86%, rgba(127, 233, 219, 0.28), transparent 45%),
+    var(--bg-color, #f0f5ff);
+  color: var(--text-color, #091420);
   font-size: 16px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
 }
 
 h1,
@@ -26,6 +31,24 @@ button {
   border: none;
   background: none;
   font-size: 1rem;
+}
+
+input,
+select,
+textarea,
+button {
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  input,
+  select,
+  textarea,
+  button {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
 }
 
 :where(button, input, select, textarea, a):focus-visible {

@@ -580,7 +580,7 @@ const getSelectStyle = (overrides = {}) => ({
   borderRadius: 'var(--radius-lg)',
   fontSize: '14px',
   outline: 'none',
-  backgroundColor: 'white',
+  backgroundColor: 'rgba(255, 255, 255, 0.35)',
   color: 'var(--text-color)',
   fontFamily: 'inherit',
   cursor: 'pointer',
@@ -591,20 +591,28 @@ const getSelectStyle = (overrides = {}) => ({
   backgroundRepeat: 'no-repeat',
   backgroundPosition: 'right 14px center',
   backgroundSize: '12px 8px',
-  transition: 'border-color 0.2s, box-shadow 0.2s',
+  backdropFilter: 'blur(16px) saturate(170%)',
+  WebkitBackdropFilter: 'blur(16px) saturate(170%)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.45)',
+  transition: 'border-color 0.2s, box-shadow 0.2s, background-color 0.2s',
   ...overrides
 });
 
 const customStyles = {
   root: {
-    '--bg-color': '#FFFFFF',
-    '--text-color': '#000000',
-    '--accent-color': '#EFEF00',
-    '--border-color': '#E0E0E0',
+    '--bg-color': '#edf4ff',
+    '--text-color': '#071321',
+    '--accent-color': '#cbe4ff',
+    '--border-color': 'rgba(255, 255, 255, 0.45)',
     '--radius-lg': '24px',
     '--radius-sm': '8px',
     '--spacing-unit': '8px',
-    '--font-main': "'Helvetica Neue', Helvetica, Arial, sans-serif"
+    '--font-main': "'Helvetica Neue', Helvetica, Arial, sans-serif",
+    '--glass-bg': 'rgba(255, 255, 255, 0.34)',
+    '--glass-panel-bg': 'rgba(255, 255, 255, 0.28)',
+    '--glass-border': 'rgba(255, 255, 255, 0.55)',
+    '--glass-shadow': '0 16px 34px rgba(6, 28, 61, 0.16)',
+    '--glass-blur': '18px'
   }
 };
 
@@ -662,7 +670,10 @@ const Header = ({ language, onLanguageChange, t }) => {
     fontWeight: isActive ? 600 : 400,
     padding: '8px 14px',
     borderRadius: '999px',
-    background: isActive ? 'rgba(0, 0, 0, 0.06)' : 'transparent',
+    background: isActive ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.2)',
+    border: '1px solid rgba(255,255,255,0.45)',
+    backdropFilter: 'blur(12px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(12px) saturate(160%)',
     transition: 'background 0.2s'
   });
 
@@ -674,10 +685,13 @@ const Header = ({ language, onLanguageChange, t }) => {
       flexWrap: 'wrap',
       gap: '10px 24px',
       padding: '24px 40px',
-      borderBottom: '1px solid var(--border-color)',
+      borderBottom: '1px solid var(--glass-border)',
       position: 'sticky',
       top: 0,
-      background: 'var(--bg-color)',
+      background: 'var(--glass-bg)',
+      backdropFilter: 'blur(var(--glass-blur)) saturate(170%)',
+      WebkitBackdropFilter: 'blur(var(--glass-blur)) saturate(170%)',
+      boxShadow: 'var(--glass-shadow)',
       zIndex: 100
     }}>
       <div style={{
@@ -730,8 +744,9 @@ const Modal = ({ isOpen, onClose, title, children, width = '600px' }) => {
       left: 0,
       right: 0,
       bottom: 0,
-      background: 'rgba(255, 255, 255, 0.9)',
-      backdropFilter: 'blur(5px)',
+      background: 'rgba(8, 22, 41, 0.3)',
+      backdropFilter: 'blur(12px)',
+      WebkitBackdropFilter: 'blur(12px)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -749,15 +764,17 @@ const Modal = ({ isOpen, onClose, title, children, width = '600px' }) => {
       <div
         className="modal-scroll-hidden"
         style={{
-          background: 'white',
+          background: 'var(--glass-bg)',
           width,
           maxWidth: '95vw',
           maxHeight: '86vh',
           overflowY: 'auto',
-          border: '1px solid var(--text-color)',
+          border: '1px solid var(--glass-border)',
           borderRadius: 'var(--radius-lg)',
           padding: '40px',
-          boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
+          boxShadow: 'var(--glass-shadow)',
+          backdropFilter: 'blur(var(--glass-blur)) saturate(175%)',
+          WebkitBackdropFilter: 'blur(var(--glass-blur)) saturate(175%)',
           position: 'relative'
         }}
         onMouseDown={(event) => {
@@ -786,8 +803,8 @@ const Card = ({ issue, onClick, onDragStart, onDragEnd, t }) => {
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       style={{
-        background: 'var(--bg-color)',
-        border: '1px solid var(--border-color)',
+        background: 'var(--glass-panel-bg)',
+        border: '1px solid var(--glass-border)',
         borderRadius: '12px',
         padding: '20px',
         marginBottom: '12px',
@@ -796,11 +813,11 @@ const Card = ({ issue, onClick, onDragStart, onDragEnd, t }) => {
         position: 'relative'
       }}
       onMouseOver={(e) => {
-        e.currentTarget.style.borderColor = 'var(--text-color)';
-        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)';
+        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.75)';
+        e.currentTarget.style.boxShadow = '0 10px 20px rgba(14, 45, 82, 0.18)';
       }}
       onMouseOut={(e) => {
-        e.currentTarget.style.borderColor = 'var(--border-color)';
+        e.currentTarget.style.borderColor = 'var(--glass-border)';
         e.currentTarget.style.boxShadow = 'none';
       }}
     >
